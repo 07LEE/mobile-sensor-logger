@@ -16,7 +16,11 @@ import '../models/session_status.dart';
 
 /// Starts and stops every sensor engine as one unit and fans their streams
 /// into the per-session CSV files.
-class SessionController extends Notifier<Session?> {
+///
+/// State is an [AsyncValue] so the UI can distinguish "starting up" from
+/// "recording", and so a failure to start — a denied permission being the
+/// common one — surfaces instead of being swallowed.
+class SessionController extends AsyncNotifier<Session?> {
   final List<StreamSubscription<Object>> _subscriptions = [];
   final List<CsvWriter> _writers = [];
 
@@ -24,12 +28,28 @@ class SessionController extends Notifier<Session?> {
   DateTime _lastFrameSavedAt = DateTime.fromMillisecondsSinceEpoch(0);
   int _frameSeq = 0;
 
+  // Returned synchronously so the app opens in the idle state rather than
+  // flashing a loading indicator before any session exists.
   @override
-  Session? build() => null;
+  FutureOr<Session?> build() => null;
 
   Future<void> startSession() async {
-    if (state?.status == SessionStatus.recording) return;
+    if (state.value?.status == SessionStatus.recording) return;
 
+    state = const AsyncValue.loading();
+
+    try {
+      final session = await _openSession();
+      state = AsyncValue.data(session);
+    } catch (error, stackTrace) {
+      // Engines may have started before the failing one threw; leaving them
+      // running would keep the sensors powered with nothing consuming them.
+      await _teardown();
+      state = AsyncValue.error(error, stackTrace);
+    }
+  }
+
+  Future<Session> _openSession() async {
     final startTime = DateTime.now();
     final sessionId = _formatSessionId(startTime);
 
@@ -46,19 +66,13 @@ class SessionController extends Notifier<Session?> {
       ),
     );
 
-    final imuWriter = await _openWriter(
-      '$dirPath/imu.csv',
-      ImuSample.csvHeader,
-    );
-    final gpsWriter = await _openWriter(
-      '$dirPath/gps.csv',
-      GpsSample.csvHeader,
-    );
+    final imuWriter = await _openWriter('$dirPath/imu.csv', ImuSample.csvHeader);
+    final gpsWriter = await _openWriter('$dirPath/gps.csv', GpsSample.csvHeader);
     final batteryWriter = await _openWriter(
       '$dirPath/battery.csv',
       BatterySample.csvHeader,
     );
-    final frameWriter = await _openWriter(
+    final frameIndexWriter = await _openWriter(
       '$dirPath/frames/frame_index.csv',
       CameraFrame.csvHeader,
     );
@@ -67,7 +81,7 @@ class SessionController extends Notifier<Session?> {
     final gpsEngine = ref.read(gpsEngineProvider);
     final batteryEngine = ref.read(batteryEngineProvider);
     final cameraEngine = ref.read(cameraEngineProvider);
-    final jpegWriter = ref.read(frameWriterProvider);
+    final frameWriter = ref.read(frameWriterProvider);
 
     _subscriptions.addAll([
       imuEngine.stream.listen((s) => imuWriter.writeRow(s.toCsvRow())),
@@ -81,12 +95,12 @@ class SessionController extends Notifier<Session?> {
         }
         _lastFrameSavedAt = now;
 
-        final frame = await jpegWriter.writeFrame(
+        final frame = await frameWriter.writeFrame(
           image: image,
           sessionDirPath: dirPath,
           frameSeq: _frameSeq++,
         );
-        frameWriter.writeRow(frame.toCsvRow());
+        frameIndexWriter.writeRow(frame.toCsvRow());
       }),
     ]);
 
@@ -102,7 +116,7 @@ class SessionController extends Notifier<Session?> {
       (_) => _flushAll(),
     );
 
-    state = Session(
+    return Session(
       id: sessionId,
       startTime: startTime,
       directoryPath: dirPath,
@@ -111,9 +125,30 @@ class SessionController extends Notifier<Session?> {
   }
 
   Future<void> stopSession() async {
-    final session = state;
+    final session = state.value;
     if (session?.status != SessionStatus.recording) return;
 
+    await _teardown();
+
+    final endTime = DateTime.now();
+    await ref.read(storageManagerProvider).writeManifest(
+          session!.directoryPath,
+          SessionManifest(
+            sessionId: session.id,
+            startTime: session.startTime,
+            endTime: endTime,
+            imuSampleRateHz: SensorConstants.imuSampleRateHz,
+          ),
+        );
+
+    state = AsyncValue.data(
+      session.copyWith(status: SessionStatus.stopped, endTime: endTime),
+    );
+  }
+
+  /// Releases everything [_openSession] acquired. Safe to call when only part
+  /// of the startup sequence completed, so it doubles as failure cleanup.
+  Future<void> _teardown() async {
     _flushTimer?.cancel();
     _flushTimer = null;
 
@@ -134,24 +169,8 @@ class SessionController extends Notifier<Session?> {
     }
     _writers.clear();
 
-    final endTime = DateTime.now();
-    await ref.read(storageManagerProvider).writeManifest(
-          session!.directoryPath,
-          SessionManifest(
-            sessionId: session.id,
-            startTime: session.startTime,
-            endTime: endTime,
-            imuSampleRateHz: SensorConstants.imuSampleRateHz,
-          ),
-        );
-
     _frameSeq = 0;
     _lastFrameSavedAt = DateTime.fromMillisecondsSinceEpoch(0);
-
-    state = session.copyWith(
-      status: SessionStatus.stopped,
-      endTime: endTime,
-    );
   }
 
   Future<CsvWriter> _openWriter(String path, List<String> header) async {
@@ -174,6 +193,5 @@ class SessionController extends Notifier<Session?> {
   }
 }
 
-final sessionControllerProvider = NotifierProvider<SessionController, Session?>(
-  SessionController.new,
-);
+final sessionControllerProvider =
+    AsyncNotifierProvider<SessionController, Session?>(SessionController.new);

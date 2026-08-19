@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:geolocator/geolocator.dart';
 
 import '../../core/sensor_engine.dart';
+import '../../core/sensor_exception.dart';
 import 'gps_sample.dart';
 
 /// Publishes GPS fixes shaped like sensor_msgs/NavSatFix.
@@ -22,9 +23,7 @@ class GpsEngine implements SensorEngine<GpsSample> {
   Future<void> start() async {
     if (_isRunning) return;
 
-    if (!await _ensurePermission()) {
-      throw StateError('Location permission denied');
-    }
+    await _ensurePermission();
     _isRunning = true;
 
     _subscription = Geolocator.getPositionStream(
@@ -48,15 +47,30 @@ class GpsEngine implements SensorEngine<GpsSample> {
     });
   }
 
-  Future<bool> _ensurePermission() async {
-    if (!await Geolocator.isLocationServiceEnabled()) return false;
+  Future<void> _ensurePermission() async {
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      throw const SensorException(
+        'Location services are turned off. Enable them to log GPS.',
+      );
+    }
 
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    return permission == LocationPermission.always ||
-        permission == LocationPermission.whileInUse;
+
+    if (permission == LocationPermission.deniedForever) {
+      throw const SensorException(
+        'Location permission is permanently denied. Grant it in system '
+        'settings to log GPS.',
+      );
+    }
+    if (permission != LocationPermission.always &&
+        permission != LocationPermission.whileInUse) {
+      throw const SensorException(
+        'Location permission is required to log GPS.',
+      );
+    }
   }
 
   @override

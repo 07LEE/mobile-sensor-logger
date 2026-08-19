@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 
+import '../../core/sensor_exception.dart';
+
 /// Wraps CameraController's preview image stream.
 ///
 /// Frames arrive at the preview rate (typically 30fps); throttling to the
@@ -22,15 +24,27 @@ class CameraEngine {
 
     final cameras = await availableCameras();
     if (cameras.isEmpty) {
-      throw StateError('No camera available on this device');
+      throw const SensorException('No camera is available on this device.');
     }
 
+    // Requested explicitly because iOS otherwise streams bgra8888, which the
+    // YUV decoder cannot read.
     final controller = CameraController(
       cameras.first,
       ResolutionPreset.medium,
       enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.yuv420,
     );
-    await controller.initialize();
+    try {
+      await controller.initialize();
+    } on CameraException catch (e) {
+      await controller.dispose();
+      throw SensorException(
+        e.code == 'CameraAccessDenied'
+            ? 'Camera permission is required to log frames.'
+            : 'Camera could not be started: ${e.description ?? e.code}',
+      );
+    }
     _cameraController = controller;
     _isRunning = true;
 
