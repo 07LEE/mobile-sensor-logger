@@ -9,6 +9,24 @@ Mobile Sensor Logger is a standalone mobile application for logging smartphone c
 - GPS and Battery Engine: Records geolocation latitude, longitude, altitude, and battery metrics
 - Storage Manager: Manages per-session directories and logs sensor data to CSV/JSON files and video formats
 
+## Data Schema
+
+Logged values follow the ROS conventions used by
+[web-ros-collector](https://github.com/07LEE/web-ros-collector), so a session can be
+replayed into the same topics this project was derived from. IMU vectors are stored
+already converted to REP-103 axes (`ROS_X = phone_Y`, `ROS_Y = -phone_X`, `ROS_Z = phone_Z`)
+in rad/s and m/s².
+
+Each session is written to `sessions/session_YYYYMMDD_HHMMSS/`:
+
+| File | ROS equivalent | Columns |
+| --- | --- | --- |
+| `imu.csv` | `sensor_msgs/Imu` (`phone_imu`) | `timestamp_us, ang_vel_x/y/z, lin_acc_x/y/z` |
+| `gps.csv` | `sensor_msgs/NavSatFix` (`gps_link`) | `timestamp_us, latitude, longitude, altitude, horizontal_accuracy, vertical_accuracy, status` |
+| `battery.csv` | `sensor_msgs/BatteryState` (`phone_link`) | `timestamp_us, percentage, power_supply_status` |
+| `frames/frame_index.csv` | `sensor_msgs/CompressedImage` (`phone_camera`) | `timestamp_us, frame_seq, filename, format, exposure_time_us, iso` |
+| `session.json` | — | Session metadata plus the unit/axis convention used |
+
 ## Setup & Getting Started
 
 ### 1. Flutter SDK Installation
