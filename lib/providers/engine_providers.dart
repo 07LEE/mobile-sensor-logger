@@ -5,6 +5,7 @@ import '../features/camera/camera_engine.dart';
 import '../features/camera/frame_writer.dart';
 import '../features/gps/gps_engine.dart';
 import '../features/imu/imu_engine.dart';
+import '../features/storage/session_exporter.dart';
 import '../features/storage/storage_manager.dart';
 
 final imuEngineProvider = Provider<ImuEngine>((ref) {
@@ -35,4 +36,8 @@ final frameWriterProvider = Provider<FrameWriter>((ref) => FrameWriter());
 
 final storageManagerProvider = Provider<StorageManager>(
   (ref) => StorageManager(),
+);
+
+final sessionExporterProvider = Provider<SessionExporter>(
+  (ref) => SessionExporter(),
 );

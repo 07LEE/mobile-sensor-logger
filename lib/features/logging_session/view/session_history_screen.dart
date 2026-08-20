@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../providers/engine_providers.dart';
 import '../../storage/session_manifest.dart';
@@ -41,15 +42,8 @@ class SessionHistoryScreen extends ConsumerWidget {
             child: ListView.separated(
               itemCount: manifests.length,
               separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) => _SessionTile(
-                manifest: manifests[index],
-                onDelete: () async {
-                  await ref
-                      .read(storageManagerProvider)
-                      .deleteSession(manifests[index].sessionId);
-                  ref.invalidate(sessionListProvider);
-                },
-              ),
+              itemBuilder: (context, index) =>
+                  _SessionTile(manifest: manifests[index]),
             ),
           );
         },
@@ -58,14 +52,21 @@ class SessionHistoryScreen extends ConsumerWidget {
   }
 }
 
-class _SessionTile extends StatelessWidget {
+class _SessionTile extends ConsumerStatefulWidget {
   final SessionManifest manifest;
-  final Future<void> Function() onDelete;
 
-  const _SessionTile({required this.manifest, required this.onDelete});
+  const _SessionTile({required this.manifest});
+
+  @override
+  ConsumerState<_SessionTile> createState() => _SessionTileState();
+}
+
+class _SessionTileState extends ConsumerState<_SessionTile> {
+  bool _isExporting = false;
 
   @override
   Widget build(BuildContext context) {
+    final manifest = widget.manifest;
     final duration = manifest.duration;
 
     return ListTile(
@@ -77,24 +78,74 @@ class _SessionTile extends StatelessWidget {
             : 'Duration ${_formatDuration(duration)}'
                 ' · IMU ${manifest.imuSampleRateHz}Hz',
       ),
-      trailing: IconButton(
-        icon: const Icon(Icons.delete_outline),
-        tooltip: 'Delete session',
-        onPressed: () async {
-          final confirmed = await _confirmDelete(context);
-          if (confirmed) await onDelete();
-        },
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_isExporting)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.ios_share),
+              tooltip: 'Export session',
+              onPressed: _export,
+            ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: 'Delete session',
+            onPressed: _isExporting ? null : _confirmAndDelete,
+          ),
+        ],
       ),
     );
   }
 
-  Future<bool> _confirmDelete(BuildContext context) async {
-    final result = await showDialog<bool>(
+  /// Zips the session and hands it to the system share sheet, where the user
+  /// chooses the destination.
+  Future<void> _export() async {
+    setState(() => _isExporting = true);
+
+    try {
+      final sessionId = widget.manifest.sessionId;
+      final dirPath =
+          await ref.read(storageManagerProvider).sessionDirectoryPath(sessionId);
+      final zip = await ref.read(sessionExporterProvider).export(dirPath);
+
+      if (!mounted) return;
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(zip.path)],
+          fileNameOverrides: ['$sessionId.zip'],
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Export failed: $error'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
+  Future<void> _confirmAndDelete() async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete session?'),
         content: Text(
-          '${manifest.sessionId} and all of its recorded data will be '
+          '${widget.manifest.sessionId} and all of its recorded data will be '
           'permanently removed.',
         ),
         actions: [
@@ -109,7 +160,13 @@ class _SessionTile extends StatelessWidget {
         ],
       ),
     );
-    return result ?? false;
+
+    if (confirmed != true) return;
+
+    await ref
+        .read(storageManagerProvider)
+        .deleteSession(widget.manifest.sessionId);
+    ref.invalidate(sessionListProvider);
   }
 
   String _formatDuration(Duration duration) {

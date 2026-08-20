@@ -8,6 +8,7 @@ Mobile Sensor Logger is a standalone mobile application for logging smartphone c
 - IMU Sensor Engine: High-rate (100Hz+) accelerometer and gyroscope logging synchronized with microsecond timestamps
 - GPS and Battery Engine: Records geolocation latitude, longitude, altitude, and battery metrics
 - Storage Manager: Manages per-session directories and logs sensor data to CSV/JSON files and video formats
+- Session Export: Packs a recorded session into a ZIP and hands it to the system share sheet for transfer off the device
 
 ## Data Schema
 

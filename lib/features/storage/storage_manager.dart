@@ -51,6 +51,11 @@ class StorageManager {
     return manifests;
   }
 
+  Future<String> sessionDirectoryPath(String sessionId) async {
+    final root = await getApplicationDocumentsDirectory();
+    return '${root.path}/sessions/$sessionId';
+  }
+
   Future<void> deleteSession(String sessionId) async {
     final root = await getApplicationDocumentsDirectory();
     final sessionDir = Directory('${root.path}/sessions/$sessionId');
