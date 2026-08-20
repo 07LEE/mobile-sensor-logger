@@ -194,11 +194,11 @@ void ToggleRecording(AppState* state, const FrameData& frame) {
     state->recorder.Stop();
     __android_log_print(
         ANDROID_LOG_INFO, kTag,
-        "stopped: %lld recorded, %lld too close, %lld untracked, "
+        "stopped: %lld written from %lld considered, %lld untracked, "
         "%lld without image",
-        static_cast<long long>(state->recorder.recorded_frames()),
-        static_cast<long long>(state->recorder.skipped_frames()),
-        static_cast<long long>(state->recorder.dropped_frames()),
+        static_cast<long long>(state->recorder.written_frames()),
+        static_cast<long long>(state->recorder.considered_frames()),
+        static_cast<long long>(state->recorder.untracked_frames()),
         static_cast<long long>(state->recorder.frames_without_image()));
     return;
   }

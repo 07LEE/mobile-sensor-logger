@@ -5,18 +5,15 @@
 
 namespace sensor_logger {
 
-// Decides which frames are worth writing.
+// Decides where one stretch of movement ends and the next begins.
 //
-// Recording every tracked frame is not viable: at the resolutions this app asks
-// for, a frame is megabytes and the camera produces thirty a second. Nor is it
-// useful — thirty near-identical views of one spot add nothing a reconstruction
-// can triangulate, while the disk and write bandwidth they consume is what
-// limits how long a capture can run.
+// This does not pick the frame to keep — SessionRecorder writes the sharpest
+// frame of each stretch, not the one that closed it, because the frame that
+// happens to cross the threshold is as likely to be blurred as any other. What
+// this bounds is how far apart written viewpoints end up.
 //
-// A frame is kept when the camera has moved or turned far enough since the last
-// kept one, which spends the budget on parallax instead of duplicates. Holding
-// the phone still records nothing after the first frame; sweeping it records
-// steadily.
+// Holding the phone still never closes a stretch, so nothing accumulates;
+// sweeping it closes one every few centimetres.
 class KeyframeSelector {
  public:
   // Defaults are a starting point, not a measured optimum: they have never been
@@ -30,9 +27,8 @@ class KeyframeSelector {
       : min_translation_m_(min_translation_m),
         min_rotation_rad_(min_rotation_rad) {}
 
-  // True when `pose` is far enough from the last accepted one. Accepting a
-  // frame updates the reference, so the caller must only call this for frames
-  // it will actually write.
+  // True when `pose` is far enough from the last accepted one to start a new
+  // stretch, which also moves the reference forward.
   bool Accept(const CameraPose& pose);
 
   void Reset();

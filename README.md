@@ -14,7 +14,7 @@ One directory per session under `<external files>/sessions/`:
 | File | Contents |
 | --- | --- |
 | `frames/<timestamp_ns>.yuv` | Raw `YUV_420_888` planes, concatenated |
-| `frames.csv` | `timestamp_ns, filename, width, height, num_planes,` then row stride, pixel stride and length per plane |
+| `frames.csv` | `timestamp_ns, filename, width, height, num_planes, sharpness,` then row stride, pixel stride and length per plane |
 | `poses.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, fx, fy, cx, cy, image_width, image_height` |
 | `points.csv` | `timestamp_ns, x, y, z, confidence` |
 | `session.json` | Frame counts and the pose convention |
@@ -38,13 +38,26 @@ check if captures come out smaller than expected. Full sensor resolution is not
 reachable this way; it would need a separate Camera2 stream through
 `SharedCamera`.
 
-Not every tracked frame is written. A frame is kept only once the camera has
-moved 5cm or turned about 6 degrees from the last kept one. At these
-resolutions a frame is megabytes and the camera produces thirty a second, so
-recording everything would fill the device in minutes — and thirty views of one
-spot give a reconstruction nothing that one view does not. Holding the phone
-still records nothing; sweeping it records steadily. The thresholds are in
-`keyframe_selector.h` and have never been checked against a real capture.
+**Sharpness decides which frames survive.** Handheld capture produces defocused
+and motion-smeared frames continuously, and which ones are bad cannot be
+predicted from the pose. So every tracked frame is scored — variance of the
+Laplacian over the luma plane, subsampled — and the sharpest frame of each
+stretch of movement is the one written.
+
+Keeping every frame is the other way to be sure of getting a sharp one, but a
+frame is megabytes at capture resolution and the camera produces thirty a
+second, so the disk runs out long before a useful capture is finished. Scoring
+on the phone keeps the choice while writing one frame per viewpoint.
+
+A stretch ends once the camera has moved 5cm or turned about 6 degrees, at which
+point that stretch's best frame is written and the next begins. Holding the
+phone still writes nothing after the first frame; sweeping it writes steadily.
+The thresholds are in `keyframe_selector.h`, the subsampling step is in
+`session_recorder.cc`, and neither has been checked against a real capture.
+
+The score is in `frames.csv`. It has no absolute meaning — it moves with scene
+content and exposure — so it is only comparable between frames of the same scene
+taken moments apart.
 
 A frame is only logged if it was tracking **and** its image was written. Poses
 without images cannot be processed, so a partial frame is counted rather than

@@ -7,25 +7,33 @@
 
 #include "ar_session.h"
 #include "keyframe_selector.h"
+#include "pending_frame.h"
 
 namespace sensor_logger {
 
 // Writes one capture session to disk.
 //
 // Layout under <root>/<session_id>/:
-//   poses.csv        one row per recorded frame
+//   poses.csv        one row per written frame
 //   points.csv       feature points, tagged with the frame they came from
-//   frames.csv       image dimensions and plane strides, per frame
-//   frames/          one raw YUV_420_888 file per kept frame
+//   frames.csv       image dimensions, plane strides, and sharpness per frame
+//   frames/          one raw YUV_420_888 file per written frame
+//
+// Sharpness drives which frames survive. Handheld capture produces defocused
+// and motion-smeared frames continuously, and which ones are bad cannot be
+// predicted from the pose, so every tracked frame is scored and the sharpest of
+// each stretch of movement is the one written. Keeping every frame is the other
+// way to be sure of getting a sharp one, but a frame is megabytes at capture
+// resolution and the camera produces thirty a second, so the disk runs out long
+// before a useful capture is finished.
+//
+// A stretch ends when the camera has moved far enough that the next viewpoint
+// is worth having, which KeyframeSelector decides.
 //
 // Images are written as the planes ARCore hands over, without conversion: there
 // is no JPEG encoder in the NDK, and converting on the phone would spend the
-// capture's frame budget on work the workstation can do later. The cost is size
-// — the strides in frames.csv are what makes the files decodable.
-//
-// Not every tracked frame is written. KeyframeSelector rejects frames taken too
-// close to the last kept one, since duplicate viewpoints cost write bandwidth
-// without giving a reconstruction anything new.
+// capture's frame budget on work the workstation can do later. The strides in
+// frames.csv are what makes the files decodable.
 //
 // Frames that arrive while tracking is lost are dropped rather than written
 // with a stale pose, and every category is counted so a session can be judged
@@ -41,22 +49,23 @@ class SessionRecorder {
   // Creates the session directory under `root` and opens the log files.
   bool Start(const std::string& root, int64_t start_timestamp_ns);
 
-  // Appends a frame. Ignored unless recording, and skipped when not tracking.
+  // Offers a frame. Scored and buffered; written only if it ends up the
+  // sharpest of its stretch.
   void Record(const FrameData& frame);
 
+  // Writes any buffered frame, then closes the session.
   void Stop();
 
   bool is_recording() const { return recording_; }
-  int64_t skipped_frames() const { return selector_.rejected(); }
-  int64_t recorded_frames() const { return recorded_frames_; }
-  int64_t dropped_frames() const { return dropped_frames_; }
+  int64_t written_frames() const { return written_frames_; }
+  int64_t considered_frames() const { return considered_frames_; }
+  int64_t untracked_frames() const { return untracked_frames_; }
   int64_t frames_without_image() const { return frames_without_image_; }
   const std::string& session_path() const { return session_path_; }
 
  private:
-  // Returns false if the image could not be written, in which case the frame is
-  // not logged either — a pose whose image is missing cannot be processed.
-  bool WriteImage(const FrameData& frame);
+  void FlushPending();
+  bool WriteImage(const PendingFrame& frame, const std::string& filename);
   void WriteManifest(int64_t end_timestamp_ns);
 
   bool recording_ = false;
@@ -65,10 +74,14 @@ class SessionRecorder {
   std::ofstream points_;
   std::ofstream frames_;
 
-  int64_t start_timestamp_ns_ = 0;
   KeyframeSelector selector_;
-  int64_t recorded_frames_ = 0;
-  int64_t dropped_frames_ = 0;
+  PendingFrame pending_;
+
+  int64_t start_timestamp_ns_ = 0;
+  int64_t last_timestamp_ns_ = 0;
+  int64_t written_frames_ = 0;
+  int64_t considered_frames_ = 0;
+  int64_t untracked_frames_ = 0;
   int64_t frames_without_image_ = 0;
 };
 

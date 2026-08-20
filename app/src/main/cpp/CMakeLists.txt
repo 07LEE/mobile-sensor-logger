@@ -12,6 +12,8 @@ add_library(sensor_logger SHARED
     native_app.cc
     ar_session.cc
     keyframe_selector.cc
+    pending_frame.cc
+    sharpness.cc
     session_recorder.cc
 )
 
