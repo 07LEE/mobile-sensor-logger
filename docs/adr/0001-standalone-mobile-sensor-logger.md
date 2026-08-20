@@ -3,7 +3,7 @@
 Date: 2026-08-14
 
 ## Status
-Accepted
+Cancelled by [0002-cpp-arcore-capture-app](0002-cpp-arcore-capture-app.md).
 
 ## Context
 Initially, a web-based ROS 2 sensor collector (web-ros-collector) was considered to stream smartphone camera frames, IMU sensor data, and GPS telemetry over local HTTPS connections.

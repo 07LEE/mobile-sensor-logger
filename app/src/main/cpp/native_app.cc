@@ -192,10 +192,12 @@ void StartAr(AppState* state) {
 void ToggleRecording(AppState* state, const FrameData& frame) {
   if (state->recorder.is_recording()) {
     state->recorder.Stop();
-    __android_log_print(ANDROID_LOG_INFO, kTag,
-                        "stopped: %lld frames recorded, %lld dropped",
-                        static_cast<long long>(state->recorder.recorded_frames()),
-                        static_cast<long long>(state->recorder.dropped_frames()));
+    __android_log_print(
+        ANDROID_LOG_INFO, kTag,
+        "stopped: %lld recorded, %lld untracked, %lld without image",
+        static_cast<long long>(state->recorder.recorded_frames()),
+        static_cast<long long>(state->recorder.dropped_frames()),
+        static_cast<long long>(state->recorder.frames_without_image()));
     return;
   }
 

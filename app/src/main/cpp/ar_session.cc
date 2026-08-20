@@ -2,6 +2,8 @@
 
 #include <android/log.h>
 
+#include <utility>
+
 namespace sensor_logger {
 namespace {
 
@@ -43,8 +45,60 @@ bool ArSession::Create(JNIEnv* env, jobject context) {
     return false;
   }
 
+  SelectLargestCpuImageConfig();
+
   ArFrame_create(session_, frame_.receive());
   return frame_.get() != nullptr;
+}
+
+void ArSession::SelectLargestCpuImageConfig() {
+  ArCameraConfigFilterHandle filter;
+  ArCameraConfigFilter_create(session_, filter.receive());
+  if (!filter) return;
+
+  ArCameraConfigListHandle configs;
+  ArCameraConfigList_create(session_, configs.receive());
+  if (!configs) return;
+
+  ArSession_getSupportedCameraConfigsWithFilter(session_, filter.get(),
+                                                configs.get());
+
+  int32_t count = 0;
+  ArCameraConfigList_getSize(session_, configs.get(), &count);
+  if (count <= 0) return;
+
+  ArCameraConfigHandle best;
+  int64_t best_pixels = 0;
+
+  for (int32_t i = 0; i < count; ++i) {
+    ArCameraConfigHandle candidate;
+    ArCameraConfig_create(session_, candidate.receive());
+    ArCameraConfigList_getItem(session_, configs.get(), i, candidate.get());
+
+    int32_t width = 0;
+    int32_t height = 0;
+    ArCameraConfig_getImageDimensions(session_, candidate.get(), &width,
+                                      &height);
+
+    const int64_t pixels = static_cast<int64_t>(width) * height;
+    if (pixels > best_pixels) {
+      best_pixels = pixels;
+      best = std::move(candidate);
+    }
+  }
+
+  if (!best) return;
+
+  if (ArSession_setCameraConfig(session_, best.get()) != AR_SUCCESS) {
+    LogError("ArSession_setCameraConfig failed; keeping the default");
+    return;
+  }
+
+  int32_t width = 0;
+  int32_t height = 0;
+  ArCameraConfig_getImageDimensions(session_, best.get(), &width, &height);
+  __android_log_print(ANDROID_LOG_INFO, kTag, "CPU image config: %dx%d", width,
+                      height);
 }
 
 bool ArSession::Resume() {
@@ -89,8 +143,13 @@ bool ArSession::Update(FrameData* out) {
     ReadPose(camera, &out->pose);
     ReadIntrinsics(camera, &out->intrinsics);
     ReadPointCloud(&out->point_cloud);
+    ReadCameraImage(&out->image);
   } else {
     out->point_cloud.clear();
+    // Releases the previous frame's image too, so a dropped frame does not
+    // leave one held against the pool.
+    image_.reset();
+    out->image = CameraImageView{};
   }
 
   ArCamera_release(camera);
@@ -129,6 +188,40 @@ bool ArSession::ReadIntrinsics(ArCamera* camera, CameraIntrinsics* out) const {
   ArCameraIntrinsics_getImageDimensions(session_, intrinsics.get(),
                                         &out->image_width, &out->image_height);
   return true;
+}
+
+void ArSession::ReadCameraImage(CameraImageView* out) {
+  *out = CameraImageView{};
+
+  // Releasing last frame's image first: ARCore draws from a small pool, and
+  // holding two at once exhausts it within a few frames.
+  image_.reset();
+
+  const ArStatus status =
+      ArFrame_acquireCameraImage(session_, frame_.get(), image_.receive());
+  if (status != AR_SUCCESS) {
+    // NOT_YET_AVAILABLE happens routinely on the first frames; only a genuinely
+    // exhausted pool is worth reporting.
+    if (status == AR_ERROR_RESOURCE_EXHAUSTED) {
+      LogError("camera image pool exhausted");
+    }
+    return;
+  }
+
+  ArImage_getWidth(session_, image_.get(), &out->width);
+  ArImage_getHeight(session_, image_.get(), &out->height);
+  ArImage_getNumberOfPlanes(session_, image_.get(), &out->num_planes);
+
+  if (out->num_planes > 3) out->num_planes = 3;
+
+  for (int32_t i = 0; i < out->num_planes; ++i) {
+    ImagePlane& plane = out->planes[i];
+    ArImage_getPlaneData(session_, image_.get(), i, &plane.data, &plane.length);
+    ArImage_getPlaneRowStride(session_, image_.get(), i, &plane.row_stride);
+    ArImage_getPlanePixelStride(session_, image_.get(), i, &plane.pixel_stride);
+  }
+
+  out->valid = out->num_planes > 0 && out->planes[0].data != nullptr;
 }
 
 void ArSession::ReadPointCloud(std::vector<FeaturePoint>* out) const {

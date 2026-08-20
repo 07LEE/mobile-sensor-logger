@@ -64,6 +64,11 @@ using ArPointCloudHandle = ArHandle<ArPointCloud, ArPointCloud_release>;
 using ArCameraIntrinsicsHandle =
     ArHandle<ArCameraIntrinsics, ArCameraIntrinsics_destroy>;
 using ArImageHandle = ArHandle<ArImage, ArImage_release>;
+using ArCameraConfigHandle = ArHandle<ArCameraConfig, ArCameraConfig_destroy>;
+using ArCameraConfigListHandle =
+    ArHandle<ArCameraConfigList, ArCameraConfigList_destroy>;
+using ArCameraConfigFilterHandle =
+    ArHandle<ArCameraConfigFilter, ArCameraConfigFilter_destroy>;
 
 // ArCamera is not owned by the caller — it is valid only for the frame it came
 // from and must not be released — so it is deliberately absent here.

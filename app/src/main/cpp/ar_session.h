@@ -37,6 +37,27 @@ struct CameraIntrinsics {
   int32_t image_height;
 };
 
+// One plane of a YUV_420_888 image. Non-owning.
+struct ImagePlane {
+  const uint8_t* data = nullptr;
+  int32_t length = 0;
+  int32_t row_stride = 0;
+  int32_t pixel_stride = 0;
+};
+
+// A view onto the current frame's camera image.
+//
+// The pixel data belongs to ARCore and stays valid only until the next
+// ArSession::Update, which releases the image it came from. Consumers must
+// write it out during the same iteration rather than holding the pointers.
+struct CameraImageView {
+  bool valid = false;
+  int32_t width = 0;
+  int32_t height = 0;
+  int32_t num_planes = 0;
+  ImagePlane planes[3];
+};
+
 // Everything worth recording from a single ARCore frame.
 //
 // Populated only when the camera is actually tracking; a frame captured while
@@ -47,6 +68,7 @@ struct FrameData {
   CameraPose pose{};
   CameraIntrinsics intrinsics{};
   std::vector<FeaturePoint> point_cloud;
+  CameraImageView image;
   bool is_tracking = false;
 };
 
@@ -79,12 +101,21 @@ class ArSession {
   bool IsValid() const { return session_ != nullptr; }
 
  private:
+  // Picks the camera configuration with the largest CPU-accessible image, since
+  // that resolution caps the detail any later processing can recover.
+  void SelectLargestCpuImageConfig();
+
   bool ReadPose(ArCamera* camera, CameraPose* out) const;
   bool ReadIntrinsics(ArCamera* camera, CameraIntrinsics* out) const;
   void ReadPointCloud(std::vector<FeaturePoint>* out) const;
+  void ReadCameraImage(CameraImageView* out);
 
   ArSession_* session_ = nullptr;
   ArFrameHandle frame_;
+
+  // Held across the caller's use of FrameData::image and released on the next
+  // Update, because the plane pointers stay valid only while it lives.
+  ArImageHandle image_;
 };
 
 }  // namespace sensor_logger
