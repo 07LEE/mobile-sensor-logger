@@ -1,20 +1,49 @@
+import java.net.URI
+
 plugins {
     id("com.android.application")
 }
 
 // The ARCore AAR carries the native library but no headers and no Prefab
-// package, so CMake cannot find it the way it finds game-activity. The library
-// is unpacked here and its path handed to CMake below; the header is vendored
-// under src/main/cpp/include, since it is published only in the SDK repository.
+// package, so CMake cannot find it the way it finds game-activity. Both pieces
+// are fetched here and their paths handed to CMake below.
 val arcoreVersion = "1.49.0"
 val arcoreNatives: Configuration by configurations.creating
 
 val arcoreNativeDir = layout.buildDirectory.dir("arcore-native")
+val arcoreIncludeDir = layout.buildDirectory.dir("arcore-include")
 
 val extractArcoreNatives by tasks.registering(Copy::class) {
     from({ arcoreNatives.map { zipTree(it) } })
     include("jni/**")
     into(arcoreNativeDir)
+}
+
+// The C API header ships only in the SDK repository, not on Maven. It is
+// downloaded rather than committed because it is Google's file under ARCore's
+// terms, and this repository is public — redistributing it here is avoidable.
+// Declaring the output keeps it from being fetched on every build.
+val downloadArcoreHeader by tasks.registering {
+    val header = arcoreIncludeDir.map { it.file("arcore_c_api.h") }
+    outputs.file(header)
+
+    doLast {
+        val target = header.get().asFile
+        target.parentFile.mkdirs()
+
+        val url = "https://raw.githubusercontent.com/google-ar/" +
+            "arcore-android-sdk/v$arcoreVersion/libraries/include/arcore_c_api.h"
+
+        URI(url).toURL().openStream().use { source ->
+            target.outputStream().use { source.copyTo(it) }
+        }
+
+        // A truncated or redirected download would otherwise surface as a
+        // confusing compile error much later.
+        if (target.length() < 1000) {
+            throw GradleException("ARCore header download looks wrong: $url")
+        }
+    }
 }
 
 android {
@@ -36,6 +65,8 @@ android {
                 arguments += "-DANDROID_STL=c++_shared"
                 arguments += "-DARCORE_LIBPATH=" +
                     arcoreNativeDir.get().asFile.resolve("jni").path
+                arguments += "-DARCORE_INCLUDE=" +
+                    arcoreIncludeDir.get().asFile.path
             }
         }
 
@@ -80,5 +111,5 @@ dependencies {
 }
 
 tasks.named("preBuild") {
-    dependsOn(extractArcoreNatives)
+    dependsOn(extractArcoreNatives, downloadArcoreHeader)
 }

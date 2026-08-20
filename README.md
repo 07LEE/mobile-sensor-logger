@@ -70,8 +70,23 @@ signal that a capture went badly.
 Requires the Android SDK, NDK, and CMake. ARCore needs API 24+, an
 ARCore-supported device, and arm64/armv7 — there is no emulator path.
 
-There is no Gradle wrapper in the repository yet; open the project in Android
-Studio, or generate one with `gradle wrapper`.
+```bash
+./gradlew assembleDebug
+```
+
+The first build needs network access: ARCore's C API header ships only in the
+SDK repository, not on Maven, so Gradle downloads it rather than keeping a copy
+of Google's file in this repository. The native library is unpacked from the
+ARCore AAR at the same time.
+
+## ARCore terms
+
+This app uses [ARCore](https://developers.google.com/ar), which carries
+[additional terms of service](https://developers.google.com/ar/develop/terms)
+beyond the licence of this repository. They permit commercial use and require no
+source disclosure, but they do place obligations on anything shipped: users must
+be told the app includes ARCore, and be given Google's terms and privacy policy.
+Read them before distributing a build.
 
 ## Status
 
