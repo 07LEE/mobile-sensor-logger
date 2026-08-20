@@ -19,6 +19,7 @@ One directory per session under `<external files>/sessions/`:
 | `poses.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, fx, fy, cx, cy, image_width, image_height` |
 | `points.csv` | `timestamp_ns, x, y, z, confidence` |
 | `imu.csv` | `timestamp_ns, sensor, x, y, z` — `sensor` is `accel` or `gyro` |
+| `candidates.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, sharpness, point_count, median_point_distance_m` |
 | `session.json` | Frame counts and the pose convention |
 
 Poses are in ARCore's right-handed world frame, rotation as a quaternion in
@@ -92,7 +93,25 @@ The score is in `frames.csv`. It has no absolute meaning — it moves with scene
 content and exposure — so it is only comparable between frames of the same scene
 taken moments apart.
 
-A frame is only logged if it was tracking **and** its image was written. Poses
+**Every frame that was scored is logged, even when its image is not kept.**
+Selection discards most of what the camera produced — a few dozen images out of
+a couple of thousand scored — and the thresholds it discards on were guessed
+rather than measured. `candidates.csv` is what keeps that reviewable: a row is
+about a hundred bytes, so the pose, the sharpness score, and how far away the
+scene was all survive even though the image does not. What a different threshold
+would have selected can be worked out from a capture already taken, rather than
+from another trip to the same place. Rows join to `frames.csv` on
+`timestamp_ns`; the ones that appear in both are the frames that were kept.
+
+`median_point_distance_m` is there because distance is what a threshold in
+metres is missing. Five centimetres beside a desk is a genuinely different angle
+on the subject; five centimetres beside a far wall is the same photograph. It is
+the median distance from the camera to the feature points ARCore was tracking
+that frame — the median rather than the mean, because the cloud carries stray
+points far behind the subject. It is `0` when the cloud was empty, which
+`point_count` distinguishes from a real zero.
+
+A frame is only logged in `frames.csv` if it was tracking **and** its image was written. Poses
 without images cannot be processed, so a partial frame is counted rather than
 half-written. `session.json` carries the counts — `written_frames`,
 `considered_frames`, `untracked_frames`, `frames_without_image` — which are the

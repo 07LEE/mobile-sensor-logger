@@ -2,7 +2,9 @@
 
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <cinttypes>
+#include <cmath>
 #include <cstdio>
 
 #include "sharpness.h"
@@ -13,6 +15,35 @@ namespace {
 // Every 4th pixel on both axes. Blur is a low-frequency effect, so the estimate
 // survives subsampling, and this has to run on every frame the camera produces.
 constexpr int32_t kSharpnessStep = 4;
+
+// Median distance from the camera to the points ARCore is tracking this frame.
+//
+// How far away the scene is decides what counts as a new viewpoint. Five
+// centimetres beside a desk is a genuinely different angle on the subject; five
+// centimetres beside a far wall is the same photograph. A threshold in metres
+// cannot tell those apart, and tuning one against real captures needs the
+// distance it should have been measured against, recorded at the time.
+//
+// The median rather than the mean, because ARCore's cloud carries stray points
+// far behind the subject that would drag an average out. `scratch` is reused
+// across frames to keep this off the allocator.
+float MedianPointDistance(const FrameData& frame, std::vector<float>* scratch) {
+  scratch->clear();
+  scratch->reserve(frame.point_cloud.size());
+
+  for (const FeaturePoint& point : frame.point_cloud) {
+    const float dx = point.x - frame.pose.translation[0];
+    const float dy = point.y - frame.pose.translation[1];
+    const float dz = point.z - frame.pose.translation[2];
+    scratch->push_back(std::sqrt(dx * dx + dy * dy + dz * dz));
+  }
+
+  if (scratch->empty()) return 0.0f;
+
+  const size_t middle = scratch->size() / 2;
+  std::nth_element(scratch->begin(), scratch->begin() + middle, scratch->end());
+  return (*scratch)[middle];
+}
 
 bool MakeDirectory(const std::string& path) {
   if (mkdir(path.c_str(), 0755) == 0) return true;
@@ -66,12 +97,15 @@ bool SessionRecorder::Start(const std::string& root,
   points_.open(session_path_ + "/points.csv", std::ios::out | std::ios::trunc);
   frames_.open(session_path_ + "/frames.csv", std::ios::out | std::ios::trunc);
   imu_.open(session_path_ + "/imu.csv", std::ios::out | std::ios::trunc);
+  candidates_.open(session_path_ + "/candidates.csv",
+                   std::ios::out | std::ios::trunc);
   if (!poses_.is_open() || !points_.is_open() || !frames_.is_open() ||
-      !imu_.is_open()) {
+      !imu_.is_open() || !candidates_.is_open()) {
     poses_.close();
     points_.close();
     frames_.close();
     imu_.close();
+    candidates_.close();
     return false;
   }
 
@@ -79,6 +113,8 @@ bool SessionRecorder::Start(const std::string& root,
             "fx,fy,cx,cy,image_width,image_height\n";
   points_ << "timestamp_ns,x,y,z,confidence\n";
   imu_ << "timestamp_ns,sensor,x,y,z\n";
+  candidates_ << "timestamp_ns,tx,ty,tz,qx,qy,qz,qw,sharpness,point_count,"
+                 "median_point_distance_m\n";
   frames_ << "timestamp_ns,filename,width,height,sharpness,chroma_layout,"
              "luma_row_stride,chroma_row_stride,chroma_pixel_stride,"
              "segment0_length,segment1_length,segment2_length\n";
@@ -120,6 +156,8 @@ void SessionRecorder::Record(const FrameData& frame) {
       LumaSharpness(luma.data, frame.image.width, frame.image.height,
                     luma.row_stride, kSharpnessStep);
 
+  WriteCandidate(frame, sharpness);
+
   // Moving past the threshold closes the current stretch: whatever the sharpest
   // frame in it turned out to be is written now, and this frame opens the next.
   if (selector_.Accept(frame.pose)) {
@@ -143,6 +181,17 @@ void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
   }
   imu_samples_ += static_cast<int64_t>(samples.size());
   imu_.flush();
+}
+
+void SessionRecorder::WriteCandidate(const FrameData& frame, float sharpness) {
+  const CameraPose& pose = frame.pose;
+  candidates_ << frame.timestamp_ns << ',' << pose.translation[0] << ','
+              << pose.translation[1] << ',' << pose.translation[2] << ','
+              << pose.rotation[0] << ',' << pose.rotation[1] << ','
+              << pose.rotation[2] << ',' << pose.rotation[3] << ','
+              << sharpness << ',' << frame.point_cloud.size() << ','
+              << MedianPointDistance(frame, &distance_scratch_) << '\n';
+  candidates_.flush();
 }
 
 void SessionRecorder::FlushPending() {
@@ -216,6 +265,7 @@ void SessionRecorder::Stop() {
   points_.close();
   frames_.close();
   imu_.close();
+  candidates_.close();
   WriteManifest(last_timestamp_ns_);
   recording_ = false;
 }

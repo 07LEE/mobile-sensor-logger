@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "ar_session.h"
 #include "imu_source.h"
@@ -19,7 +20,16 @@ namespace sensor_logger {
 //   points.csv       feature points, tagged with the frame they came from
 //   frames.csv       image dimensions, plane strides, and sharpness per frame
 //   imu.csv          accelerometer and gyroscope readings
+//   candidates.csv   pose and sharpness of every frame that was scored
 //   frames/          one raw YUV_420_888 file per written frame
+//
+// candidates.csv is what makes the discarding reviewable. Selection throws away
+// most of what the camera produced — thirty-odd images kept out of a couple of
+// thousand scored — on thresholds that were guessed rather than measured. The
+// images are gone, but a row per scored frame costs about a hundred bytes, so
+// the pose, the sharpness, and how far away the scene was all survive. What a
+// different threshold would have chosen can then be worked out from a capture
+// already taken, instead of from another trip to the same place.
 //
 // Sharpness drives which frames survive. Handheld capture produces defocused
 // and motion-smeared frames continuously, and which ones are bad cannot be
@@ -72,6 +82,7 @@ class SessionRecorder {
   const std::string& session_path() const { return session_path_; }
 
  private:
+  void WriteCandidate(const FrameData& frame, float sharpness);
   void FlushPending();
   bool WriteImage(const PendingFrame& frame, const std::string& filename);
   void WriteManifest(int64_t end_timestamp_ns);
@@ -82,6 +93,11 @@ class SessionRecorder {
   std::ofstream points_;
   std::ofstream frames_;
   std::ofstream imu_;
+  std::ofstream candidates_;
+
+  // Reused by the median distance calculation so it does not allocate on every
+  // frame the camera produces.
+  std::vector<float> distance_scratch_;
 
   KeyframeSelector selector_;
   PendingFrame pending_;
