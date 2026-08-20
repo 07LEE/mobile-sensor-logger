@@ -8,6 +8,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # library is how the native entry point gets an Activity to hand ARCore.
 find_package(game-activity REQUIRED CONFIG)
 
+# GameActivity's JNI entry point lives in a static library and nothing in our
+# code calls it, so the linker would drop it and the activity would fail to
+# start with UnsatisfiedLinkError. Naming it as undefined keeps it, and the rest
+# of the glue comes in with it.
+set(CMAKE_SHARED_LINKER_FLAGS
+    "${CMAKE_SHARED_LINKER_FLAGS} -u Java_com_google_androidgamesdk_GameActivity_initializeNativeCode")
+
 add_library(sensor_logger SHARED
     native_app.cc
     ar_session.cc

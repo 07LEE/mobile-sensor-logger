@@ -102,8 +102,18 @@ android {
 }
 
 dependencies {
+    // games-activity still pulls kotlin-stdlib-jdk7/jdk8 1.6.21 while appcompat
+    // pulls kotlin-stdlib 1.8.22. Those jdk artifacts were folded into the main
+    // one in Kotlin 1.8, so both on the classpath means duplicate classes. The
+    // BOM pins every stdlib artifact to one version and the folded-in ones
+    // become empty shells.
+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.8.22"))
+
     implementation("com.google.ar:core:$arcoreVersion")
     implementation("androidx.games:games-activity:3.0.5")
+    // GameActivity extends AppCompatActivity; without this its class fails to
+    // load and the activity cannot be instantiated at all.
+    implementation("androidx.appcompat:appcompat:1.7.0")
 
     // Same artifact again, resolved into its own configuration purely so the
     // AAR can be unpacked for its native library.

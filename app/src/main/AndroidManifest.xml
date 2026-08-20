@@ -20,7 +20,7 @@
             android:exported="true"
             android:configChanges="orientation|keyboardHidden|screenSize|density"
             android:screenOrientation="portrait"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+            android:theme="@style/AppTheme">
 
             <!-- Name of the native library GameActivity loads. -->
             <meta-data android:name="android.app.lib_name" android:value="sensor_logger" />
