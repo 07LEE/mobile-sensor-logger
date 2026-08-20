@@ -1,8 +1,9 @@
 # Mobile Sensor Logger
 
-Android capture app for 3D reconstruction data. Records the camera image for
-every frame together with the ARCore pose and intrinsics it was taken with, so
-the session can be processed on a workstation afterwards.
+Android capture app for 3D reconstruction data. Writes camera images together
+with the ARCore pose and intrinsics each was taken with, so the session can be
+processed on a workstation afterwards. Frames are chosen by sharpness rather
+than kept wholesale — see below.
 
 Written against the ARCore **C API** — the app is C++ with no application Java
 or Kotlin, hosted by `GameActivity`.
@@ -61,8 +62,9 @@ on the phone keeps the choice while writing one frame per viewpoint.
 A stretch ends once the camera has moved 5cm or turned about 6 degrees, at which
 point that stretch's best frame is written and the next begins. Holding the
 phone still writes nothing after the first frame; sweeping it writes steadily.
-The thresholds are in `keyframe_selector.h`, the subsampling step is in
-`session_recorder.cc`, and neither has been checked against a real capture.
+The thresholds are in `keyframe_selector.h` and the subsampling step is in
+`session_recorder.cc`. Both are guesses: captures have been run, but neither
+value has been tuned against the reconstruction it is meant to feed.
 
 The score is in `frames.csv`. It has no absolute meaning — it moves with scene
 content and exposure — so it is only comparable between frames of the same scene
@@ -70,9 +72,10 @@ taken moments apart.
 
 A frame is only logged if it was tracking **and** its image was written. Poses
 without images cannot be processed, so a partial frame is counted rather than
-half-written. `session.json` reports every category — recorded, skipped as too
-close, dropped for lost tracking, and missing an image — which is the quickest
-signal that a capture went badly.
+half-written. `session.json` carries the counts — `written_frames`,
+`considered_frames`, `untracked_frames`, `frames_without_image` — which are the
+quickest signal that a capture went badly. A session that ran for a while with
+`written_frames` near zero was usually not tracking.
 
 ## Building
 
