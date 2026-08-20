@@ -6,6 +6,7 @@
 #include <string>
 
 #include "ar_session.h"
+#include "imu_source.h"
 #include "keyframe_selector.h"
 #include "pending_frame.h"
 
@@ -17,6 +18,7 @@ namespace sensor_logger {
 //   poses.csv        one row per written frame
 //   points.csv       feature points, tagged with the frame they came from
 //   frames.csv       image dimensions, plane strides, and sharpness per frame
+//   imu.csv          accelerometer and gyroscope readings
 //   frames/          one raw YUV_420_888 file per written frame
 //
 // Sharpness drives which frames survive. Handheld capture produces defocused
@@ -53,6 +55,11 @@ class SessionRecorder {
   // sharpest of its stretch.
   void Record(const FrameData& frame);
 
+  // Inertial samples are written as they arrive, unfiltered. Unlike frames they
+  // are not selected: the gaps are what would make the stream unusable for
+  // integration, and the volume is trivial next to the images.
+  void RecordImu(const std::vector<ImuSample>& samples);
+
   // Writes any buffered frame, then closes the session.
   void Stop();
 
@@ -61,6 +68,7 @@ class SessionRecorder {
   int64_t considered_frames() const { return considered_frames_; }
   int64_t untracked_frames() const { return untracked_frames_; }
   int64_t frames_without_image() const { return frames_without_image_; }
+  int64_t imu_samples() const { return imu_samples_; }
   const std::string& session_path() const { return session_path_; }
 
  private:
@@ -73,6 +81,7 @@ class SessionRecorder {
   std::ofstream poses_;
   std::ofstream points_;
   std::ofstream frames_;
+  std::ofstream imu_;
 
   KeyframeSelector selector_;
   PendingFrame pending_;
@@ -83,6 +92,7 @@ class SessionRecorder {
   int64_t considered_frames_ = 0;
   int64_t untracked_frames_ = 0;
   int64_t frames_without_image_ = 0;
+  int64_t imu_samples_ = 0;
 };
 
 }  // namespace sensor_logger

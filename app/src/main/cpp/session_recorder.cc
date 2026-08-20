@@ -65,16 +65,20 @@ bool SessionRecorder::Start(const std::string& root,
   poses_.open(session_path_ + "/poses.csv", std::ios::out | std::ios::trunc);
   points_.open(session_path_ + "/points.csv", std::ios::out | std::ios::trunc);
   frames_.open(session_path_ + "/frames.csv", std::ios::out | std::ios::trunc);
-  if (!poses_.is_open() || !points_.is_open() || !frames_.is_open()) {
+  imu_.open(session_path_ + "/imu.csv", std::ios::out | std::ios::trunc);
+  if (!poses_.is_open() || !points_.is_open() || !frames_.is_open() ||
+      !imu_.is_open()) {
     poses_.close();
     points_.close();
     frames_.close();
+    imu_.close();
     return false;
   }
 
   poses_ << "timestamp_ns,tx,ty,tz,qx,qy,qz,qw,"
             "fx,fy,cx,cy,image_width,image_height\n";
   points_ << "timestamp_ns,x,y,z,confidence\n";
+  imu_ << "timestamp_ns,sensor,x,y,z\n";
   frames_ << "timestamp_ns,filename,width,height,sharpness,chroma_layout,"
              "luma_row_stride,chroma_row_stride,chroma_pixel_stride,"
              "segment0_length,segment1_length,segment2_length\n";
@@ -85,6 +89,7 @@ bool SessionRecorder::Start(const std::string& root,
   considered_frames_ = 0;
   untracked_frames_ = 0;
   frames_without_image_ = 0;
+  imu_samples_ = 0;
   selector_.Reset();
   pending_.Clear();
   recording_ = true;
@@ -127,6 +132,17 @@ void SessionRecorder::Record(const FrameData& frame) {
   if (!pending_.valid() || sharpness > pending_.sharpness()) {
     pending_.Set(frame, sharpness);
   }
+}
+
+void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
+  if (!recording_ || samples.empty()) return;
+
+  for (const ImuSample& sample : samples) {
+    imu_ << sample.timestamp_ns << ',' << (sample.is_gyroscope ? "gyro" : "accel")
+         << ',' << sample.x << ',' << sample.y << ',' << sample.z << '\n';
+  }
+  imu_samples_ += static_cast<int64_t>(samples.size());
+  imu_.flush();
 }
 
 void SessionRecorder::FlushPending() {
@@ -199,6 +215,7 @@ void SessionRecorder::Stop() {
   poses_.close();
   points_.close();
   frames_.close();
+  imu_.close();
   WriteManifest(last_timestamp_ns_);
   recording_ = false;
 }
@@ -215,6 +232,9 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"considered_frames\": " << considered_frames_ << ",\n"
            << "  \"untracked_frames\": " << untracked_frames_ << ",\n"
            << "  \"frames_without_image\": " << frames_without_image_ << ",\n"
+           << "  \"imu_samples\": " << imu_samples_ << ",\n"
+           << "  \"imu_note\": \"m/s^2 and rad/s in the device frame, on the "
+              "same clock as the frame timestamps\",\n"
            << "  \"sharpness_metric\": \"variance of Laplacian on luma, "
               "subsampled; comparable only between frames of the same scene\",\n"
            << "  \"pose_convention\": \"ARCore world, right-handed, "

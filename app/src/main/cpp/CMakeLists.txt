@@ -21,6 +21,8 @@ add_library(sensor_logger SHARED
     keyframe_selector.cc
     pending_frame.cc
     sharpness.cc
+    imu_source.cc
+    camera_timestamp_probe.cc
     session_recorder.cc
 )
 
@@ -43,6 +45,7 @@ target_link_options(sensor_logger PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(sensor_logger
     game-activity::game-activity_static
     arcore
+    camera2ndk
     android
     log
     EGL

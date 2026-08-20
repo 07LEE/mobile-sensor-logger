@@ -18,6 +18,7 @@ One directory per session under `<external files>/sessions/`:
 | `frames.csv` | `timestamp_ns, filename, width, height, sharpness, chroma_layout, luma_row_stride, chroma_row_stride, chroma_pixel_stride, segment0_length, segment1_length, segment2_length` |
 | `poses.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, fx, fy, cx, cy, image_width, image_height` |
 | `points.csv` | `timestamp_ns, x, y, z, confidence` |
+| `imu.csv` | `timestamp_ns, sensor, x, y, z` — `sensor` is `accel` or `gyro` |
 | `session.json` | Frame counts and the pose convention |
 
 Poses are in ARCore's right-handed world frame, rotation as a quaternion in
@@ -39,6 +40,27 @@ duplicate a megabyte per frame and swap the colours.
 The file is the segments listed in `frames.csv`, concatenated: luma, then either
 one interleaved chroma segment or a U and a V segment. Row strides are not the
 same as `width`.
+
+**Inertial data is recorded alongside the images.** Accelerometer and
+gyroscope are read at a requested 200Hz and written unfiltered, as separate rows
+rather than fused pairs — the two sensors deliver on their own schedules, and
+pairing them here would mean inventing a timestamp for one of them. Unlike
+frames they are not selected: the gaps are what would make the stream unusable
+for integration, and a few kilobytes a second is nothing against megabytes a
+frame.
+
+ARCore's poses are not the only thing a capture might be used for. Raw inertial
+data is what a different VIO implementation would need, what gives bundle
+adjustment an inertial constraint, and what carries the metric scale that
+monocular structure-from-motion cannot recover on its own.
+
+The two streams are comparable because they share a clock. Android lets a camera
+report its timestamps against either the boot-time clock the sensors use or one
+of its own, and `ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE` is what says which; when
+it is `UNKNOWN` there is nothing software can do to align them. Every camera on
+the tested device reports `REALTIME`, and the value is logged at startup so a
+device that does not can be recognised rather than producing quietly unusable
+captures.
 
 The app selects the camera configuration with the largest CPU-accessible image,
 since that resolution caps the detail any later processing can recover. ARCore
@@ -104,6 +126,14 @@ Read them before distributing a build.
 
 Runs on a Galaxy S25 Ultra (Android 16): the session starts, poses and 1920x1080
 frames are written, and the frames decode to correct colour off-device.
+
+IMU recording and the fixed capture loop have been built but not yet run on a
+device: attaching the sensor queue to the main looper originally stopped frames
+being captured at all, because the loop polling that looper never read the
+sensor events and so never reached the frame step. Sensor capture now starts
+with the AR session and is drained inside that poll loop. The counts in
+`session.json` — `imu_samples` against `written_frames` — are what will confirm
+it.
 
 Recording currently starts by itself once ARCore is tracking, because
 `GameActivity` is not delivering touch events to the native input buffer and

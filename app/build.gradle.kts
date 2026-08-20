@@ -53,8 +53,10 @@ android {
 
     defaultConfig {
         applicationId = "com.sensor.logger"
-        // ARCore requires API 24.
-        minSdk = 24
+        // ARCore itself needs 24, but the NDK sensor API's package-scoped
+        // manager arrived in 26, and an ARCore-capable device below that is
+        // not worth the deprecated path.
+        minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"

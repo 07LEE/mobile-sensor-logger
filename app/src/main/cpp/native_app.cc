@@ -6,14 +6,19 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "ar_session.h"
+#include "camera_timestamp_probe.h"
+#include "imu_source.h"
 #include "session_recorder.h"
 
 namespace {
 
 using sensor_logger::ArSession;
 using sensor_logger::FrameData;
+using sensor_logger::ImuSample;
+using sensor_logger::ImuSource;
 using sensor_logger::SessionRecorder;
 
 constexpr char kTag[] = "sensor_logger";
@@ -40,6 +45,7 @@ struct AppState {
   int height = 0;
 
   ArSession ar_session;
+  ImuSource imu;
   SessionRecorder recorder;
   bool ar_started = false;
   bool permission_granted = false;
@@ -187,6 +193,16 @@ void StartAr(AppState* state) {
 
   state->ar_started = true;
   LogInfo("ARCore session running");
+
+  // Inertial capture starts with the AR session, not with the app. Both stay
+  // running for the whole session, independent of whether ARCore is tracking:
+  // the samples covering a gap are exactly the ones that could bridge it later.
+  //
+  // Starting earlier would stall the main loop. The sensor queue shares the
+  // looper, and until the AR session exists that loop waits on the looper with
+  // a timeout; a stream of sensor events keeps it there, and the camera
+  // permission is only re-checked once it comes back out.
+  state->imu.Start(state->app->looper, "com.sensor.logger");
 }
 
 void ToggleRecording(AppState* state, const FrameData& frame) {
@@ -195,11 +211,12 @@ void ToggleRecording(AppState* state, const FrameData& frame) {
     __android_log_print(
         ANDROID_LOG_INFO, kTag,
         "stopped: %lld written from %lld considered, %lld untracked, "
-        "%lld without image",
+        "%lld without image, %lld imu samples",
         static_cast<long long>(state->recorder.written_frames()),
         static_cast<long long>(state->recorder.considered_frames()),
         static_cast<long long>(state->recorder.untracked_frames()),
-        static_cast<long long>(state->recorder.frames_without_image()));
+        static_cast<long long>(state->recorder.frames_without_image()),
+        static_cast<long long>(state->recorder.imu_samples()));
     return;
   }
 
@@ -274,12 +291,15 @@ extern "C" void android_main(android_app* app) {
   // one admits only touchscreen sources, which is not what arrives here.
   android_app_set_motion_event_filter(app, nullptr);
 
+  sensor_logger::LogCameraTimestampSource();
+
   state.permission_granted = HasCameraPermission(app);
   if (!state.permission_granted) {
     RequestCameraPermission(app);
   }
 
   FrameData frame;
+  std::vector<ImuSample> imu_samples;
 
   while (true) {
     int events = 0;
@@ -293,9 +313,22 @@ extern "C" void android_main(android_app* app) {
     //
     // Once AR is running the timeout is zero, so the loop paces itself on
     // ArSession_update's blocking mode instead of the event queue.
-    while (ALooper_pollOnce(state.ar_started ? 0 : 50, nullptr, &events,
-                            reinterpret_cast<void**>(&source)) >= 0) {
+    int ident = 0;
+    while ((ident = ALooper_pollOnce(state.ar_started ? 0 : 50, nullptr, &events,
+                                     reinterpret_cast<void**>(&source))) >= 0) {
       if (source != nullptr) source->process(app, source);
+
+      // The sensor queue has no poll source; it reports itself by identifier,
+      // and pollOnce keeps returning that identifier until something reads the
+      // events. Draining has to happen here rather than beside the frame step
+      // below, which this loop would otherwise never reach: four hundred
+      // samples a second means there is always another event pending, so the
+      // loop spins forever and no frame is ever captured.
+      if (ident == ImuSource::kLooperIdent) {
+        state.imu.Drain(&imu_samples);
+        state.recorder.RecordImu(imu_samples);
+      }
+
       if (app->destroyRequested != 0) {
         state.recorder.Stop();
         TerminateDisplay(&state);
