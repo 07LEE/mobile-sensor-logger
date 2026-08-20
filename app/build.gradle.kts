@@ -2,6 +2,21 @@ plugins {
     id("com.android.application")
 }
 
+// The ARCore AAR carries the native library but no headers and no Prefab
+// package, so CMake cannot find it the way it finds game-activity. The library
+// is unpacked here and its path handed to CMake below; the header is vendored
+// under src/main/cpp/include, since it is published only in the SDK repository.
+val arcoreVersion = "1.49.0"
+val arcoreNatives: Configuration by configurations.creating
+
+val arcoreNativeDir = layout.buildDirectory.dir("arcore-native")
+
+val extractArcoreNatives by tasks.registering(Copy::class) {
+    from({ arcoreNatives.map { zipTree(it) } })
+    include("jni/**")
+    into(arcoreNativeDir)
+}
+
 android {
     namespace = "com.sensor.logger"
     compileSdk = 35
@@ -19,6 +34,8 @@ android {
             cmake {
                 cppFlags += "-std=c++17"
                 arguments += "-DANDROID_STL=c++_shared"
+                arguments += "-DARCORE_LIBPATH=" +
+                    arcoreNativeDir.get().asFile.resolve("jni").path
             }
         }
 
@@ -27,6 +44,12 @@ android {
             // for it, so the device is the only build target that matters.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
+    }
+
+    // Without this, the native packages inside AAR dependencies are not exposed
+    // to CMake and find_package cannot see them.
+    buildFeatures {
+        prefab = true
     }
 
     externalNativeBuild {
@@ -48,7 +71,14 @@ android {
 }
 
 dependencies {
-    // Verify the current release before building; this pins a known-good line.
-    implementation("com.google.ar:core:1.49.0")
+    implementation("com.google.ar:core:$arcoreVersion")
     implementation("androidx.games:games-activity:3.0.5")
+
+    // Same artifact again, resolved into its own configuration purely so the
+    // AAR can be unpacked for its native library.
+    arcoreNatives("com.google.ar:core:$arcoreVersion")
+}
+
+tasks.named("preBuild") {
+    dependsOn(extractArcoreNatives)
 }

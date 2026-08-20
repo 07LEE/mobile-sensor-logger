@@ -17,7 +17,16 @@ add_library(sensor_logger SHARED
     session_recorder.cc
 )
 
-target_include_directories(sensor_logger PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# ARCore is not a Prefab package: the AAR carries only the .so, which Gradle
+# unpacks to ARCORE_LIBPATH, and the header is vendored under include/.
+add_library(arcore SHARED IMPORTED)
+set_target_properties(arcore PROPERTIES
+    IMPORTED_LOCATION ${ARCORE_LIBPATH}/${ANDROID_ABI}/libarcore_sdk_c.so)
+
+target_include_directories(sensor_logger PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
 target_link_libraries(sensor_logger
     game-activity::game-activity_static
