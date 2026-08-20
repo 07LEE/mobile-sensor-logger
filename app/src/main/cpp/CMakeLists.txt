@@ -35,6 +35,11 @@ target_include_directories(sensor_logger PRIVATE
     ${ARCORE_INCLUDE}
 )
 
+# Android 15 and newer expect native libraries aligned to a 16 KB page, and warn
+# on install otherwise. The ARCore and libc++ binaries already are; this is what
+# brings ours in line.
+target_link_options(sensor_logger PRIVATE "-Wl,-z,max-page-size=16384")
+
 target_link_libraries(sensor_logger
     game-activity::game-activity_static
     arcore

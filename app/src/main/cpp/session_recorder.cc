@@ -31,6 +31,18 @@ std::string SessionId(int64_t start_timestamp_ns) {
   return buffer;
 }
 
+const char* ChromaLayoutName(ChromaLayout layout) {
+  switch (layout) {
+    case ChromaLayout::kSemiPlanarUFirst:
+      return "semi_planar_uv";
+    case ChromaLayout::kSemiPlanarVFirst:
+      return "semi_planar_vu";
+    case ChromaLayout::kPlanar:
+      break;
+  }
+  return "planar";
+}
+
 std::string FrameFilename(int64_t timestamp_ns) {
   char buffer[64];
   std::snprintf(buffer, sizeof(buffer), "%" PRId64 ".yuv", timestamp_ns);
@@ -63,10 +75,9 @@ bool SessionRecorder::Start(const std::string& root,
   poses_ << "timestamp_ns,tx,ty,tz,qx,qy,qz,qw,"
             "fx,fy,cx,cy,image_width,image_height\n";
   points_ << "timestamp_ns,x,y,z,confidence\n";
-  frames_ << "timestamp_ns,filename,width,height,num_planes,sharpness,"
-             "y_row_stride,y_pixel_stride,y_length,"
-             "u_row_stride,u_pixel_stride,u_length,"
-             "v_row_stride,v_pixel_stride,v_length\n";
+  frames_ << "timestamp_ns,filename,width,height,sharpness,chroma_layout,"
+             "luma_row_stride,chroma_row_stride,chroma_pixel_stride,"
+             "segment0_length,segment1_length,segment2_length\n";
 
   start_timestamp_ns_ = start_timestamp_ns;
   last_timestamp_ns_ = start_timestamp_ns;
@@ -146,6 +157,13 @@ void SessionRecorder::FlushPending() {
 
   ++written_frames_;
   pending_.Clear();
+
+  // Flushed per frame rather than at Stop(). A session that ends by the process
+  // being killed — which is how a backgrounded capture usually ends — would
+  // otherwise leave the images on disk with empty CSVs describing them.
+  poses_.flush();
+  points_.flush();
+  frames_.flush();
 }
 
 bool SessionRecorder::WriteImage(const PendingFrame& frame,
@@ -160,12 +178,12 @@ bool SessionRecorder::WriteImage(const PendingFrame& frame,
   out.close();
 
   frames_ << frame.timestamp_ns() << ',' << filename << ',' << frame.width()
-          << ',' << frame.height() << ',' << frame.num_planes() << ','
-          << frame.sharpness();
+          << ',' << frame.height() << ',' << frame.sharpness() << ','
+          << ChromaLayoutName(frame.chroma_layout()) << ','
+          << frame.luma_row_stride() << ',' << frame.chroma_row_stride() << ','
+          << frame.chroma_pixel_stride();
   for (int32_t i = 0; i < 3; ++i) {
-    const ImagePlane& plane = frame.plane_info(i);
-    frames_ << ',' << plane.row_stride << ',' << plane.pixel_stride << ','
-            << plane.length;
+    frames_ << ',' << frame.segment_length(i);
   }
   frames_ << '\n';
   return true;

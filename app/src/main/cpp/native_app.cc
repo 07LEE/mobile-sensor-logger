@@ -270,6 +270,10 @@ extern "C" void android_main(android_app* app) {
   app->userData = &state;
   app->onAppCmd = HandleCommand;
 
+  // Null filter means every motion event reaches the input buffer. The default
+  // one admits only touchscreen sources, which is not what arrives here.
+  android_app_set_motion_event_filter(app, nullptr);
+
   state.permission_granted = HasCameraPermission(app);
   if (!state.permission_granted) {
     RequestCameraPermission(app);
@@ -281,10 +285,15 @@ extern "C" void android_main(android_app* app) {
     int events = 0;
     android_poll_source* source = nullptr;
 
-    // Zero timeout while running so the loop stays tied to the camera through
-    // ArSession_update's blocking mode rather than to the event queue.
-    const int timeout = state.ar_started ? 0 : -1;
-    while (ALooper_pollOnce(timeout, nullptr, &events,
+    // The timeout is re-evaluated on every call, not hoisted: the window
+    // arrives and AR starts inside this drain loop, and a value captured
+    // beforehand would leave the loop waiting forever afterwards. Nothing would
+    // wake it either, because GameActivity delivers input through its own
+    // buffer rather than the looper.
+    //
+    // Once AR is running the timeout is zero, so the loop paces itself on
+    // ArSession_update's blocking mode instead of the event queue.
+    while (ALooper_pollOnce(state.ar_started ? 0 : 50, nullptr, &events,
                             reinterpret_cast<void**>(&source)) >= 0) {
       if (source != nullptr) source->process(app, source);
       if (app->destroyRequested != 0) {
@@ -306,6 +315,21 @@ extern "C" void android_main(android_app* app) {
 
     if (state.ar_session.Update(&frame)) {
       state.recorder.Record(frame);
+    }
+
+    // Recording starts on its own once ARCore is tracking. There is no UI yet
+    // to start it from, and GameActivity is not delivering touch events to the
+    // native buffer, so waiting for a tap would mean never capturing anything.
+    if (frame.is_tracking && !state.recorder.is_recording()) {
+      ToggleRecording(&state, frame);
+    }
+
+    static int heartbeat = 0;
+    if (++heartbeat % 90 == 0) {
+      __android_log_print(
+          ANDROID_LOG_INFO, kTag, "tracking=%d recording=%d written=%lld",
+          (int)frame.is_tracking, (int)state.recorder.is_recording(),
+          (long long)state.recorder.written_frames());
     }
 
     if (ConsumeTap(app)) ToggleRecording(&state, frame);

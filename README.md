@@ -13,8 +13,8 @@ One directory per session under `<external files>/sessions/`:
 
 | File | Contents |
 | --- | --- |
-| `frames/<timestamp_ns>.yuv` | Raw `YUV_420_888` planes, concatenated |
-| `frames.csv` | `timestamp_ns, filename, width, height, num_planes, sharpness,` then row stride, pixel stride and length per plane |
+| `frames/<timestamp_ns>.yuv` | Raw `YUV_420_888`, luma then chroma |
+| `frames.csv` | `timestamp_ns, filename, width, height, sharpness, chroma_layout, luma_row_stride, chroma_row_stride, chroma_pixel_stride, segment0_length, segment1_length, segment2_length` |
 | `poses.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, fx, fy, cx, cy, image_width, image_height` |
 | `points.csv` | `timestamp_ns, x, y, z, confidence` |
 | `session.json` | Frame counts and the pose convention |
@@ -26,9 +26,18 @@ the key joining every file.
 
 Images are written exactly as ARCore hands them over, without conversion. The
 NDK has no JPEG encoder, and converting on the phone would spend the capture's
-frame budget on work the workstation can do later. The strides in `frames.csv`
-are what make the planes decodable — they are not the same as `width`, and
-`u`/`v` may be interleaved depending on the device.
+frame budget on work the workstation can do later.
+
+`frames.csv` carries what is needed to decode them, and `chroma_layout` is the
+part to read first. Android's `YUV_420_888` allows chroma to be planar — U and V
+in separate buffers — or semi-planar, where they interleave into one and the two
+"planes" are the same memory a byte apart. A Galaxy S25 Ultra reports
+`semi_planar_vu`, meaning V comes first. Treating that as two planes would both
+duplicate a megabyte per frame and swap the colours.
+
+The file is the segments listed in `frames.csv`, concatenated: luma, then either
+one interleaved chroma segment or a U and a V segment. Row strides are not the
+same as `width`.
 
 The app selects the camera configuration with the largest CPU-accessible image,
 since that resolution caps the detail any later processing can recover. ARCore
@@ -90,16 +99,22 @@ Read them before distributing a build.
 
 ## Status
 
-Never built or run — there is no Android SDK in the development environment.
-`native_app.cc` is the least certain part: the `GameActivity` input handling,
-the JNI permission request, and the EGL setup are all unverified. The ARCore
-dependency version in `app/build.gradle.kts` should be checked against the
-current release before building.
+Runs on a Galaxy S25 Ultra (Android 16): the session starts, poses and 1920x1080
+frames are written, and the frames decode to correct colour off-device.
+
+Recording currently starts by itself once ARCore is tracking, because
+`GameActivity` is not delivering touch events to the native input buffer and
+there is no UI to start it from.
+
+If nothing is captured, check logcat: ARCore reports why it is not tracking, and
+"not enough light" is the usual answer indoors at night.
 
 ## Not implemented
 
 - **Camera preview.** ARCore renders into an external OES texture that nothing
-  draws, so the screen stays black while tracking runs.
-- **UI.** Any tap toggles recording; state is visible only through logcat.
+  draws, so the screen stays black. There is no way to see what is being
+  captured, or whether recording is running, except through logcat.
+- **Touch input.** `GameActivity` is not delivering motion events to the native
+  buffer, so the tap-to-toggle path never fires. Recording auto-starts instead.
 - **Storage management.** Sessions are written until the device runs out of
-  space; nothing warns, caps, or cleans up.
+  space; nothing warns, caps, or cleans up. A 1920x1080 frame is 3MB.

@@ -37,6 +37,18 @@ struct CameraIntrinsics {
   int32_t image_height;
 };
 
+// How the chroma planes are arranged in memory.
+//
+// Android's YUV_420_888 permits either. Planar keeps U and V in separate
+// buffers; semi-planar interleaves them into one, so the two plane pointers
+// differ by a single byte and each plane's reported length covers almost the
+// same memory. Copying both planes there would duplicate a megabyte per frame.
+enum class ChromaLayout {
+  kPlanar,
+  kSemiPlanarUFirst,
+  kSemiPlanarVFirst,
+};
+
 // One plane of a YUV_420_888 image. Non-owning.
 struct ImagePlane {
   const uint8_t* data = nullptr;
@@ -55,6 +67,7 @@ struct CameraImageView {
   int32_t width = 0;
   int32_t height = 0;
   int32_t num_planes = 0;
+  ChromaLayout chroma_layout = ChromaLayout::kPlanar;
   ImagePlane planes[3];
 };
 

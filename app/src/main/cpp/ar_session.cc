@@ -2,6 +2,7 @@
 
 #include <android/log.h>
 
+#include <cstddef>
 #include <utility>
 
 namespace sensor_logger {
@@ -11,6 +12,27 @@ constexpr char kTag[] = "sensor_logger";
 
 void LogError(const char* what) {
   __android_log_print(ANDROID_LOG_ERROR, kTag, "%s", what);
+}
+
+// Why ARCore is not tracking. Worth naming rather than logging the enum: the
+// causes are things the person holding the phone can act on, and a dark room
+// looks identical to a broken app from the outside.
+const char* TrackingFailureName(ArTrackingFailureReason reason) {
+  switch (reason) {
+    case AR_TRACKING_FAILURE_REASON_BAD_STATE:
+      return "bad state";
+    case AR_TRACKING_FAILURE_REASON_INSUFFICIENT_LIGHT:
+      return "not enough light";
+    case AR_TRACKING_FAILURE_REASON_EXCESSIVE_MOTION:
+      return "moving too fast";
+    case AR_TRACKING_FAILURE_REASON_INSUFFICIENT_FEATURES:
+      return "not enough visual detail";
+    case AR_TRACKING_FAILURE_REASON_CAMERA_UNAVAILABLE:
+      return "camera unavailable";
+    case AR_TRACKING_FAILURE_REASON_NONE:
+      break;
+  }
+  return "initialising";
 }
 
 }  // namespace
@@ -62,10 +84,9 @@ void ArSession::SelectLargestCpuImageConfig() {
   ArCameraConfigFilter_setTargetFps(
       session_, filter.get(),
       AR_CAMERA_CONFIG_TARGET_FPS_30 | AR_CAMERA_CONFIG_TARGET_FPS_60);
-  ArCameraConfigFilter_setDepthSensorUsage(
-      session_, filter.get(),
-      AR_CAMERA_CONFIG_DEPTH_SENSOR_USAGE_DO_NOT_USE |
-          AR_CAMERA_CONFIG_DEPTH_SENSOR_USAGE_REQUIRE_AND_USE);
+  // Depth is left at the default of not being used. Admitting depth-requiring
+  // configs selects one the session is not configured for, and ARCore's depth
+  // provider then fails on every frame and tracking never starts.
 
   ArCameraConfigListHandle configs;
   ArCameraConfigList_create(session_, configs.receive());
@@ -160,6 +181,17 @@ bool ArSession::Update(FrameData* out) {
   ArCamera_getTrackingState(session_, camera, &tracking_state);
   out->is_tracking = tracking_state == AR_TRACKING_STATE_TRACKING;
 
+  if (!out->is_tracking) {
+    ArTrackingFailureReason reason = AR_TRACKING_FAILURE_REASON_NONE;
+    ArCamera_getTrackingFailureReason(session_, camera, &reason);
+
+    static int64_t reported = 0;
+    if (++reported % 90 == 0) {
+      __android_log_print(ANDROID_LOG_INFO, kTag, "not tracking: %s",
+                          TrackingFailureName(reason));
+    }
+  }
+
   if (out->is_tracking) {
     ReadPose(camera, &out->pose);
     ReadIntrinsics(camera, &out->intrinsics);
@@ -240,6 +272,18 @@ void ArSession::ReadCameraImage(CameraImageView* out) {
     ArImage_getPlaneData(session_, image_.get(), i, &plane.data, &plane.length);
     ArImage_getPlaneRowStride(session_, image_.get(), i, &plane.row_stride);
     ArImage_getPlanePixelStride(session_, image_.get(), i, &plane.pixel_stride);
+  }
+
+  // Semi-planar chroma shows up as a pixel stride of two with the U and V
+  // pointers one byte apart, both indexing the same interleaved buffer.
+  if (out->num_planes == 3 && out->planes[1].pixel_stride == 2 &&
+      out->planes[1].data != nullptr && out->planes[2].data != nullptr) {
+    const ptrdiff_t offset = out->planes[2].data - out->planes[1].data;
+    if (offset == 1) {
+      out->chroma_layout = ChromaLayout::kSemiPlanarUFirst;
+    } else if (offset == -1) {
+      out->chroma_layout = ChromaLayout::kSemiPlanarVFirst;
+    }
   }
 
   out->valid = out->num_planes > 0 && out->planes[0].data != nullptr;

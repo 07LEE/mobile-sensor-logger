@@ -14,6 +14,10 @@ namespace sensor_logger {
 // written immediately has to be copied out. Only one candidate is held at a
 // time — the sharpest seen since the last write — which bounds the cost to a
 // single frame's worth of memory and one copy each time the leader changes.
+//
+// Semi-planar chroma is copied as the single interleaved buffer it actually is.
+// Taking the U and V planes at face value there would copy the same megabyte
+// twice, since both point into that one buffer a byte apart.
 class PendingFrame {
  public:
   // Copies everything needed to write this frame later.
@@ -31,12 +35,17 @@ class PendingFrame {
 
   int32_t width() const { return width_; }
   int32_t height() const { return height_; }
-  int32_t num_planes() const { return num_planes_; }
+  ChromaLayout chroma_layout() const { return chroma_layout_; }
 
-  // Plane metadata as ARCore reported it, so the copy stays decodable.
-  const ImagePlane& plane_info(int32_t index) const { return plane_info_[index]; }
+  int32_t luma_row_stride() const { return luma_row_stride_; }
+  int32_t chroma_row_stride() const { return chroma_row_stride_; }
+  int32_t chroma_pixel_stride() const { return chroma_pixel_stride_; }
 
-  // The planes, concatenated in ARCore's order.
+  // Byte counts of the segments written, in order. The third is zero for
+  // semi-planar chroma, where U and V share one segment.
+  int32_t segment_length(int32_t index) const { return segment_lengths_[index]; }
+
+  // The segments, concatenated.
   const std::vector<uint8_t>& pixels() const { return pixels_; }
 
  private:
@@ -50,8 +59,11 @@ class PendingFrame {
 
   int32_t width_ = 0;
   int32_t height_ = 0;
-  int32_t num_planes_ = 0;
-  ImagePlane plane_info_[3];
+  ChromaLayout chroma_layout_ = ChromaLayout::kPlanar;
+  int32_t luma_row_stride_ = 0;
+  int32_t chroma_row_stride_ = 0;
+  int32_t chroma_pixel_stride_ = 0;
+  int32_t segment_lengths_[3] = {0, 0, 0};
   std::vector<uint8_t> pixels_;
 };
 
