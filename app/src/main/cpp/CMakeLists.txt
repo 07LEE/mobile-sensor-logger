@@ -11,6 +11,7 @@ find_package(game-activity REQUIRED CONFIG)
 add_library(sensor_logger SHARED
     native_app.cc
     ar_session.cc
+    keyframe_selector.cc
     session_recorder.cc
 )
 

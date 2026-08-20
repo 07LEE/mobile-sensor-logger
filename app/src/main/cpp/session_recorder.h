@@ -6,6 +6,7 @@
 #include <string>
 
 #include "ar_session.h"
+#include "keyframe_selector.h"
 
 namespace sensor_logger {
 
@@ -15,16 +16,20 @@ namespace sensor_logger {
 //   poses.csv        one row per recorded frame
 //   points.csv       feature points, tagged with the frame they came from
 //   frames.csv       image dimensions and plane strides, per frame
-//   frames/          one raw YUV_420_888 file per frame
+//   frames/          one raw YUV_420_888 file per kept frame
 //
 // Images are written as the planes ARCore hands over, without conversion: there
 // is no JPEG encoder in the NDK, and converting on the phone would spend the
 // capture's frame budget on work the workstation can do later. The cost is size
 // — the strides in frames.csv are what makes the files decodable.
 //
+// Not every tracked frame is written. KeyframeSelector rejects frames taken too
+// close to the last kept one, since duplicate viewpoints cost write bandwidth
+// without giving a reconstruction anything new.
+//
 // Frames that arrive while tracking is lost are dropped rather than written
-// with a stale pose, and the count is kept so a session can be judged after
-// the fact.
+// with a stale pose, and every category is counted so a session can be judged
+// after the fact.
 class SessionRecorder {
  public:
   SessionRecorder() = default;
@@ -42,6 +47,7 @@ class SessionRecorder {
   void Stop();
 
   bool is_recording() const { return recording_; }
+  int64_t skipped_frames() const { return selector_.rejected(); }
   int64_t recorded_frames() const { return recorded_frames_; }
   int64_t dropped_frames() const { return dropped_frames_; }
   int64_t frames_without_image() const { return frames_without_image_; }
@@ -60,6 +66,7 @@ class SessionRecorder {
   std::ofstream frames_;
 
   int64_t start_timestamp_ns_ = 0;
+  KeyframeSelector selector_;
   int64_t recorded_frames_ = 0;
   int64_t dropped_frames_ = 0;
   int64_t frames_without_image_ = 0;

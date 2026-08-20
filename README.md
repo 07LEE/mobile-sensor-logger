@@ -31,13 +31,26 @@ are what make the planes decodable — they are not the same as `width`, and
 `u`/`v` may be interleaved depending on the device.
 
 The app selects the camera configuration with the largest CPU-accessible image,
-since that resolution caps the detail any later processing can recover. It is
-lower than the camera's full capability.
+since that resolution caps the detail any later processing can recover. ARCore
+defaults to VGA and only some devices offer a 1920x1080 CPU stream, so every
+config a device reports is logged at startup — that log is the first thing to
+check if captures come out smaller than expected. Full sensor resolution is not
+reachable this way; it would need a separate Camera2 stream through
+`SharedCamera`.
+
+Not every tracked frame is written. A frame is kept only once the camera has
+moved 5cm or turned about 6 degrees from the last kept one. At these
+resolutions a frame is megabytes and the camera produces thirty a second, so
+recording everything would fill the device in minutes — and thirty views of one
+spot give a reconstruction nothing that one view does not. Holding the phone
+still records nothing; sweeping it records steadily. The thresholds are in
+`keyframe_selector.h` and have never been checked against a real capture.
 
 A frame is only logged if it was tracking **and** its image was written. Poses
 without images cannot be processed, so a partial frame is counted rather than
-half-written; `session.json` reports both counts, which is the quickest signal
-that a capture went badly.
+half-written. `session.json` reports every category — recorded, skipped as too
+close, dropped for lost tracking, and missing an image — which is the quickest
+signal that a capture went badly.
 
 ## Building
 

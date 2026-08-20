@@ -60,6 +60,7 @@ bool SessionRecorder::Start(const std::string& root,
   recorded_frames_ = 0;
   dropped_frames_ = 0;
   frames_without_image_ = 0;
+  selector_.Reset();
   recording_ = true;
   return true;
 }
@@ -106,6 +107,10 @@ void SessionRecorder::Record(const FrameData& frame) {
     ++dropped_frames_;
     return;
   }
+
+  // Frames too close to the last kept one are skipped before anything is
+  // written: at these resolutions the write itself is the capture's bottleneck.
+  if (!selector_.Accept(frame.pose)) return;
 
   // The image is what gets processed later, so a pose without one is not worth
   // a row. Written first for that reason: if it fails, nothing else is logged.
@@ -154,6 +159,7 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"dropped_frames\": " << dropped_frames_ << ",\n"
            << "  \"frames_without_image\": " << frames_without_image_
            << ",\n"
+           << "  \"skipped_frames\": " << selector_.rejected() << ",\n"
            << "  \"pose_convention\": \"ARCore world, right-handed, "
               "quaternion (x,y,z,w)\"\n"
            << "}\n";

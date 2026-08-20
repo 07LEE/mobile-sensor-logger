@@ -56,6 +56,17 @@ void ArSession::SelectLargestCpuImageConfig() {
   ArCameraConfigFilter_create(session_, filter.receive());
   if (!filter) return;
 
+  // The default filter admits only 30fps configs, which on some devices hides
+  // the larger CPU image. Allowing both target rates makes the full list
+  // visible; the choice below is on resolution regardless of frame rate.
+  ArCameraConfigFilter_setTargetFps(
+      session_, filter.get(),
+      AR_CAMERA_CONFIG_TARGET_FPS_30 | AR_CAMERA_CONFIG_TARGET_FPS_60);
+  ArCameraConfigFilter_setDepthSensorUsage(
+      session_, filter.get(),
+      AR_CAMERA_CONFIG_DEPTH_SENSOR_USAGE_DO_NOT_USE |
+          AR_CAMERA_CONFIG_DEPTH_SENSOR_USAGE_REQUIRE_AND_USE);
+
   ArCameraConfigListHandle configs;
   ArCameraConfigList_create(session_, configs.receive());
   if (!configs) return;
@@ -79,6 +90,16 @@ void ArSession::SelectLargestCpuImageConfig() {
     int32_t height = 0;
     ArCameraConfig_getImageDimensions(session_, candidate.get(), &width,
                                       &height);
+
+    // Logged for every candidate: which configs a device actually offers is
+    // the first thing worth knowing when captures come out too small.
+    int32_t texture_width = 0;
+    int32_t texture_height = 0;
+    ArCameraConfig_getTextureDimensions(session_, candidate.get(),
+                                        &texture_width, &texture_height);
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "camera config %d: cpu %dx%d, texture %dx%d", i, width,
+                        height, texture_width, texture_height);
 
     const int64_t pixels = static_cast<int64_t>(width) * height;
     if (pixels > best_pixels) {
