@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- ARCore ships arm64/armv7 only and needs OpenGL ES 3.0. -->
+    <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+
+    <application
+        android:label="Sensor Logger"
+        android:hasCode="true"
+        android:allowBackup="false">
+
+        <!-- Marks the app as requiring ARCore, so Play installs it alongside. -->
+        <meta-data android:name="com.google.ar.core" android:value="required" />
+
+        <activity
+            android:name="com.google.androidgamesdk.GameActivity"
+            android:exported="true"
+            android:configChanges="orientation|keyboardHidden|screenSize|density"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+
+            <!-- Name of the native library GameActivity loads. -->
+            <meta-data android:name="android.app.lib_name" android:value="sensor_logger" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

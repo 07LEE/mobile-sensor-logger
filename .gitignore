@@ -1,30 +1,6 @@
-# Flutter & Dart build artifacts
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.packages
-.pub-cache/
-.pub/
+.gradle/
 build/
-
-# Android build & local settings
-android/.gradle/
-android/app/build/
-android/local.properties
-
-# iOS build artifacts
-ios/Flutter/App.framework
-ios/Flutter/Flutter.framework
-ios/Flutter/Flutter.podspec
-ios/Flutter/Generated.xcconfig
-ios/Pods/
-
-# IDE & Miscellaneous
+local.properties
+.cxx/
 .idea/
-.vscode/
 *.iml
-.metadata
-
-# OS Generated Files
-.DS_Store
-Thumbs.db

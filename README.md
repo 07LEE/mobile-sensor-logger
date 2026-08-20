@@ -1,57 +1,51 @@
 # Mobile Sensor Logger
 
-Mobile Sensor Logger is a standalone mobile application for logging smartphone camera frames, IMU sensor streams (accelerometer, gyroscope), GPS position telemetry, and battery state directly to device local storage.
+Android capture app for 3D reconstruction data. Records ARCore's tracked camera
+poses, intrinsics, and feature point cloud to files on the device, so a session
+can be processed off-device afterwards.
 
-## Core Features
+Written against the ARCore **C API** — the app is C++ with no application Java
+or Kotlin, hosted by `GameActivity`.
 
-- Camera Engine: Captures camera frames and records video or image files to local storage
-- IMU Sensor Engine: High-rate (100Hz+) accelerometer and gyroscope logging synchronized with microsecond timestamps
-- GPS and Battery Engine: Records geolocation latitude, longitude, altitude, and battery metrics
-- Storage Manager: Manages per-session directories and logs sensor data to CSV/JSON files and video formats
-- Session Export: Packs a recorded session into a ZIP and hands it to the system share sheet for transfer off the device
+## Output
 
-## Data Schema
+One directory per session under `<external files>/sessions/`:
 
-Logged values follow the ROS conventions used by
-[web-ros-collector](https://github.com/07LEE/web-ros-collector), so a session can be
-replayed into the same topics this project was derived from. IMU vectors are stored
-already converted to REP-103 axes (`ROS_X = phone_Y`, `ROS_Y = -phone_X`, `ROS_Z = phone_Z`)
-in rad/s and m/s².
+| File | Contents |
+| --- | --- |
+| `poses.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, fx, fy, cx, cy, image_width, image_height` |
+| `points.csv` | `timestamp_ns, x, y, z, confidence` |
+| `session.json` | Frame counts and the pose convention |
+| `frames/` | Reserved for image data |
 
-Each session is written to `sessions/session_YYYYMMDD_HHMMSS/`:
+Poses are in ARCore's right-handed world frame, rotation as a quaternion in
+`(x, y, z, w)` order. Timestamps are nanoseconds on the system clock, taken from
+ARCore rather than read at arrival, so they refer to capture time.
 
-| File | ROS equivalent | Columns |
-| --- | --- | --- |
-| `imu.csv` | `sensor_msgs/Imu` (`phone_imu`) | `timestamp_us, ang_vel_x/y/z, lin_acc_x/y/z` |
-| `gps.csv` | `sensor_msgs/NavSatFix` (`gps_link`) | `timestamp_us, latitude, longitude, altitude, horizontal_accuracy, vertical_accuracy, status` |
-| `battery.csv` | `sensor_msgs/BatteryState` (`phone_link`) | `timestamp_us, percentage, power_supply_status` |
-| `frames/frame_index.csv` | `sensor_msgs/CompressedImage` (`phone_camera`) | `timestamp_us, frame_seq, filename, format, exposure_time_us, iso` |
-| `session.json` | — | Session metadata plus the unit/axis convention used |
+Frames captured while tracking is lost are dropped rather than written with a
+stale pose. `session.json` reports how many, which is the quickest signal that a
+capture went badly.
 
-## Setup & Getting Started
+## Building
 
-### 1. Flutter SDK Installation
-
-Install the Flutter SDK via snap on Ubuntu Linux:
+Requires the Android SDK and NDK. ARCore needs API 24+, an ARCore-supported
+device, and arm64/armv7 — there is no emulator path.
 
 ```bash
-sudo snap install flutter --classic
-flutter doctor
+./gradlew assembleDebug
 ```
 
-### 2. Project Initialization
+## Status
 
-Initialize the Flutter project template in this directory:
+Not yet built or run — no Android SDK is installed in the development
+environment. See [Not implemented](#not-implemented) for what is missing beyond
+that.
 
-```bash
-flutter create --org com.sensor.logger .
-```
+## Not implemented
 
-### 3. Dependencies Configuration
-
-Add the required sensor packages in pubspec.yaml:
-
-- camera: Camera image capture and video recording
-- sensors_plus: IMU accelerometer and gyroscope data acquisition
-- geolocator: GPS geolocation positioning
-- path_provider: Local device filesystem path resolution
+- **Camera preview.** ARCore renders into an external OES texture that nothing
+  currently draws, so the screen stays black while tracking runs.
+- **Image capture.** `frames/` is created but no image data is written yet.
+- **UI.** Any tap toggles recording; state is visible only through logcat.
+- **Raw frame recording via `SharedCamera`,** which would keep the option of
+  running a different SLAM over the same capture.
