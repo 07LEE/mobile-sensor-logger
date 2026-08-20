@@ -1,14 +1,5 @@
 # Mobile Sensor Logger
 
-> **Discontinued.** Flutter's camera plugin exposes no frame capture timestamp,
-> so camera and IMU streams recorded here cannot be aligned to the precision the
-> intended uses require. Capture moves to an existing synchronised logger, and
-> this project's direction moves to converting captured sessions into rosbags and
-> datasets. See
-> [ADR 0002](docs/adr/0002-discontinue-standalone-flutter-logger.md) for the
-> survey, the verified limitation, and the alternatives considered. The code
-> below is kept as a record; the ROS-compatible schema it defines is still in use.
-
 Mobile Sensor Logger is a standalone mobile application for logging smartphone camera frames, IMU sensor streams (accelerometer, gyroscope), GPS position telemetry, and battery state directly to device local storage.
 
 ## Core Features
