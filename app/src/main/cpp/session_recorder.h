@@ -1,12 +1,14 @@
 #ifndef SENSOR_LOGGER_SESSION_RECORDER_H
 #define SENSOR_LOGGER_SESSION_RECORDER_H
 
+#include <atomic>
 #include <cstdint>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "ar_session.h"
+#include "frame_writer.h"
 #include "imu_source.h"
 #include "keyframe_selector.h"
 #include "pending_frame.h"
@@ -75,6 +77,7 @@ class SessionRecorder {
 
   bool is_recording() const { return recording_; }
   int64_t written_frames() const { return written_frames_; }
+  int64_t dropped_frames() const { return writer_.dropped(); }
   int64_t considered_frames() const { return considered_frames_; }
   int64_t untracked_frames() const { return untracked_frames_; }
   int64_t frames_without_image() const { return frames_without_image_; }
@@ -84,7 +87,13 @@ class SessionRecorder {
  private:
   void WriteCandidate(const FrameData& frame, float sharpness);
   void FlushPending();
+
+  // Both run on the writer thread. Nothing else touches poses_, points_,
+  // frames_, written_frames_ or frames_without_image_ while it is running,
+  // which is what keeps them free of locking.
+  void WriteFrame(PendingFrame& frame);
   bool WriteImage(const PendingFrame& frame, const std::string& filename);
+
   void WriteManifest(int64_t end_timestamp_ns);
 
   bool recording_ = false;
@@ -101,13 +110,14 @@ class SessionRecorder {
 
   KeyframeSelector selector_;
   PendingFrame pending_;
+  FrameWriter writer_;
 
   int64_t start_timestamp_ns_ = 0;
   int64_t last_timestamp_ns_ = 0;
-  int64_t written_frames_ = 0;
+  std::atomic<int64_t> written_frames_{0};
+  std::atomic<int64_t> frames_without_image_{0};
   int64_t considered_frames_ = 0;
   int64_t untracked_frames_ = 0;
-  int64_t frames_without_image_ = 0;
   int64_t imu_samples_ = 0;
 };
 

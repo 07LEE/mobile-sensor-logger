@@ -119,6 +119,8 @@ bool SessionRecorder::Start(const std::string& root,
              "luma_row_stride,chroma_row_stride,chroma_pixel_stride,"
              "segment0_length,segment1_length,segment2_length\n";
 
+  writer_.Start([this](PendingFrame& frame) { WriteFrame(frame); });
+
   start_timestamp_ns_ = start_timestamp_ns;
   last_timestamp_ns_ = start_timestamp_ns;
   written_frames_ = 0;
@@ -197,17 +199,24 @@ void SessionRecorder::WriteCandidate(const FrameData& frame, float sharpness) {
 void SessionRecorder::FlushPending() {
   if (!pending_.valid()) return;
 
-  const std::string filename = FrameFilename(pending_.timestamp_ns());
-  if (!WriteImage(pending_, filename)) {
+  // Dropped rather than written late, and counted by the writer. The queue only
+  // fills when the disk is behind, and the frame that would clear the backlog
+  // by waiting is the one whose viewpoint the capture is currently at.
+  writer_.Submit(std::move(pending_));
+  pending_.Clear();
+}
+
+void SessionRecorder::WriteFrame(PendingFrame& frame) {
+  const std::string filename = FrameFilename(frame.timestamp_ns());
+  if (!WriteImage(frame, filename)) {
     ++frames_without_image_;
-    pending_.Clear();
     return;
   }
 
-  const CameraPose& pose = pending_.pose();
-  const CameraIntrinsics& intrinsics = pending_.intrinsics();
+  const CameraPose& pose = frame.pose();
+  const CameraIntrinsics& intrinsics = frame.intrinsics();
 
-  poses_ << pending_.timestamp_ns() << ',' << pose.translation[0] << ','
+  poses_ << frame.timestamp_ns() << ',' << pose.translation[0] << ','
          << pose.translation[1] << ',' << pose.translation[2] << ','
          << pose.rotation[0] << ',' << pose.rotation[1] << ','
          << pose.rotation[2] << ',' << pose.rotation[3] << ','
@@ -215,13 +224,12 @@ void SessionRecorder::FlushPending() {
          << intrinsics.principal_x << ',' << intrinsics.principal_y << ','
          << intrinsics.image_width << ',' << intrinsics.image_height << '\n';
 
-  for (const FeaturePoint& point : pending_.point_cloud()) {
-    points_ << pending_.timestamp_ns() << ',' << point.x << ',' << point.y
+  for (const FeaturePoint& point : frame.point_cloud()) {
+    points_ << frame.timestamp_ns() << ',' << point.x << ',' << point.y
             << ',' << point.z << ',' << point.confidence << '\n';
   }
 
   ++written_frames_;
-  pending_.Clear();
 
   // Flushed per frame rather than at Stop(). A session that ends by the process
   // being killed — which is how a backgrounded capture usually ends — would
@@ -261,6 +269,9 @@ void SessionRecorder::Stop() {
   // be lost.
   FlushPending();
 
+  // Before the streams close: the writer thread is what writes to them.
+  writer_.Stop();
+
   poses_.close();
   points_.close();
   frames_.close();
@@ -278,10 +289,12 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
   manifest << "{\n"
            << "  \"start_timestamp_ns\": " << start_timestamp_ns_ << ",\n"
            << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
-           << "  \"written_frames\": " << written_frames_ << ",\n"
+           << "  \"written_frames\": " << written_frames_.load() << ",\n"
            << "  \"considered_frames\": " << considered_frames_ << ",\n"
            << "  \"untracked_frames\": " << untracked_frames_ << ",\n"
-           << "  \"frames_without_image\": " << frames_without_image_ << ",\n"
+           << "  \"frames_without_image\": " << frames_without_image_.load()
+           << ",\n"
+           << "  \"dropped_frames\": " << writer_.dropped() << ",\n"
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
            << "  \"imu_note\": \"m/s^2 and rad/s in the device frame, on the "
               "same clock as the frame timestamps\",\n"

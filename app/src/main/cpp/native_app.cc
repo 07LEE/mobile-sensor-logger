@@ -211,11 +211,12 @@ void ToggleRecording(AppState* state, const FrameData& frame) {
     __android_log_print(
         ANDROID_LOG_INFO, kTag,
         "stopped: %lld written from %lld considered, %lld untracked, "
-        "%lld without image, %lld imu samples",
+        "%lld without image, %lld dropped, %lld imu samples",
         static_cast<long long>(state->recorder.written_frames()),
         static_cast<long long>(state->recorder.considered_frames()),
         static_cast<long long>(state->recorder.untracked_frames()),
         static_cast<long long>(state->recorder.frames_without_image()),
+        static_cast<long long>(state->recorder.dropped_frames()),
         static_cast<long long>(state->recorder.imu_samples()));
     return;
   }
@@ -360,9 +361,11 @@ extern "C" void android_main(android_app* app) {
     static int heartbeat = 0;
     if (++heartbeat % 90 == 0) {
       __android_log_print(
-          ANDROID_LOG_INFO, kTag, "tracking=%d recording=%d written=%lld",
+          ANDROID_LOG_INFO, kTag,
+          "tracking=%d recording=%d written=%lld dropped=%lld",
           (int)frame.is_tracking, (int)state.recorder.is_recording(),
-          (long long)state.recorder.written_frames());
+          (long long)state.recorder.written_frames(),
+          (long long)state.recorder.dropped_frames());
     }
 
     if (ConsumeTap(app)) ToggleRecording(&state, frame);

@@ -111,6 +111,21 @@ that frame — the median rather than the mean, because the cloud carries stray
 points far behind the subject. It is `0` when the cloud was empty, which
 `point_count` distinguishes from a real zero.
 
+**Images are written on a thread of their own.** A frame is three megabytes,
+and writing one from the capture loop stalls that loop for as long as the write
+takes; ARCore does not hold frames while nobody is asking for them, so whatever
+arrived during the stall is gone. At the current rate, a frame every few
+seconds, that is invisible — but it is what would make keeping every frame
+impossible, since the loop would then spend most of its time in the filesystem.
+
+The queue between the two is bounded, because an unbounded one facing a disk
+that cannot keep up grows until the process is killed. When it is full the frame
+is dropped and counted rather than blocking the loop: dropping one frame costs
+one viewpoint, blocking costs whatever else the camera produced meanwhile, and a
+run of drops is the honest signal that the capture is asking for more than the
+device can write. `dropped_frames` in `session.json` is where that shows up, and
+it should be zero.
+
 A frame is only logged in `frames.csv` if it was tracking **and** its image was written. Poses
 without images cannot be processed, so a partial frame is counted rather than
 half-written. `session.json` carries the counts — `written_frames`,

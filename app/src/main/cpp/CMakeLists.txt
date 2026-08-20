@@ -21,6 +21,7 @@ add_library(sensor_logger SHARED
     keyframe_selector.cc
     pending_frame.cc
     sharpness.cc
+    frame_writer.cc
     imu_source.cc
     camera_timestamp_probe.cc
     session_recorder.cc
