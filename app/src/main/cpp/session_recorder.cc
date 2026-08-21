@@ -253,6 +253,42 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"aperture\": " << camera_.aperture << ",\n"
            << "  \"sensor_size_mm\": [" << camera_.sensor_width_mm << ", "
            << camera_.sensor_height_mm << "],\n"
+           << "  \"calibration_note\": \"intrinsics [fx, fy, cx, cy, skew] "
+              "and distortion [k1, k2, k3, p1, p2] as the manufacturer measured "
+              "them, against pre_correction_active_array; scale if that "
+              "differs from the frame size\",\n"
+           << "  \"intrinsics\": ";
+  if (camera_.has_calibration) {
+    manifest << "[" << camera_.intrinsics[0] << ", " << camera_.intrinsics[1]
+             << ", " << camera_.intrinsics[2] << ", " << camera_.intrinsics[3]
+             << ", " << camera_.intrinsics[4] << "],\n"
+             << "  \"distortion\": [" << camera_.distortion[0] << ", "
+             << camera_.distortion[1] << ", " << camera_.distortion[2] << ", "
+             << camera_.distortion[3] << ", " << camera_.distortion[4] << "],\n"
+             << "  \"pre_correction_active_array\": ["
+             << camera_.pre_correction_array[0] << ", "
+             << camera_.pre_correction_array[1] << ", "
+             << camera_.pre_correction_array[2] << ", "
+             << camera_.pre_correction_array[3] << "],\n";
+  } else {
+    manifest << "null,\n";
+  }
+
+  if (camera_.has_pose) {
+    manifest << "  \"lens_pose_translation_m\": ["
+             << camera_.pose_translation[0] << ", "
+             << camera_.pose_translation[1] << ", "
+             << camera_.pose_translation[2] << "],\n"
+             << "  \"lens_pose_rotation_xyzw\": [" << camera_.pose_rotation[0]
+             << ", " << camera_.pose_rotation[1] << ", "
+             << camera_.pose_rotation[2] << ", " << camera_.pose_rotation[3]
+             << "],\n"
+             << "  \"lens_pose_reference\": " << camera_.pose_reference
+             << ",\n";
+  }
+
+  manifest << "  \"stabilisation\": \"off, both optical and digital; either "
+              "one changes the camera geometry between frames\",\n"
            << "  \"logical_multi_camera\": "
            << (camera_.logical_multi_camera ? "true" : "false") << ",\n"
            << "  \"sensor_orientation\": " << camera_.sensor_orientation

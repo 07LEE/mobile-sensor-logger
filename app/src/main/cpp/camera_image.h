@@ -22,6 +22,28 @@ struct CameraInfo {
   float sensor_width_mm = 0.0f;
   float sensor_height_mm = 0.0f;
   bool logical_multi_camera = false;
+
+  // The calibration the manufacturer measured for this lens, if the device
+  // publishes it. Solving for intrinsics from the images alone needs wide
+  // coverage and a lot of frames; being handed them is worth a great deal when
+  // the capture is sparse.
+  //
+  // Both are expressed against the pre-correction active array, which is not
+  // the size the frames come out at, so that rectangle is recorded alongside
+  // and anything using these has to scale.
+  bool has_calibration = false;
+  float intrinsics[5] = {0, 0, 0, 0, 0};   // fx, fy, cx, cy, skew
+  float distortion[5] = {0, 0, 0, 0, 0};   // k1, k2, k3, p1, p2
+  int32_t pre_correction_array[4] = {0, 0, 0, 0};  // x, y, width, height
+
+  // Where this lens sits relative to the device's reference point, and what
+  // that reference is. On the tested device it is the primary camera rather
+  // than the gyroscope, so this gives the offset between lenses and not the
+  // camera-to-IMU transform.
+  bool has_pose = false;
+  float pose_translation[3] = {0, 0, 0};
+  float pose_rotation[4] = {0, 0, 0, 0};   // x, y, z, w
+  int32_t pose_reference = -1;
 };
 
 // How the chroma planes are arranged in memory.

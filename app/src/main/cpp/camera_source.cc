@@ -2,6 +2,7 @@
 
 #include <android/log.h>
 #include <camera/NdkCameraMetadata.h>
+#include <camera/NdkCaptureRequest.h>
 #include <media/NdkImage.h>
 
 #include <cmath>
@@ -83,6 +84,47 @@ bool CameraSource::ReadCamera(const char* id, ACameraMetadata* characteristics,
           ACAMERA_REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) {
         out->logical_multi_camera = true;
       }
+    }
+  }
+
+  if (ACameraMetadata_getConstEntry(characteristics,
+                                    ACAMERA_LENS_INTRINSIC_CALIBRATION,
+                                    &entry) == ACAMERA_OK &&
+      entry.count >= 5) {
+    for (int i = 0; i < 5; ++i) out->intrinsics[i] = entry.data.f[i];
+    out->has_calibration = true;
+
+    if (ACameraMetadata_getConstEntry(characteristics, ACAMERA_LENS_DISTORTION,
+                                      &entry) == ACAMERA_OK &&
+        entry.count >= 5) {
+      for (int i = 0; i < 5; ++i) out->distortion[i] = entry.data.f[i];
+    }
+    if (ACameraMetadata_getConstEntry(
+            characteristics,
+            ACAMERA_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE, &entry) ==
+            ACAMERA_OK &&
+        entry.count >= 4) {
+      for (int i = 0; i < 4; ++i) out->pre_correction_array[i] = entry.data.i32[i];
+    }
+  }
+
+  if (ACameraMetadata_getConstEntry(characteristics, ACAMERA_LENS_POSE_ROTATION,
+                                    &entry) == ACAMERA_OK &&
+      entry.count >= 4) {
+    for (int i = 0; i < 4; ++i) out->pose_rotation[i] = entry.data.f[i];
+    out->has_pose = true;
+
+    if (ACameraMetadata_getConstEntry(characteristics,
+                                      ACAMERA_LENS_POSE_TRANSLATION, &entry) ==
+            ACAMERA_OK &&
+        entry.count >= 3) {
+      for (int i = 0; i < 3; ++i) out->pose_translation[i] = entry.data.f[i];
+    }
+    if (ACameraMetadata_getConstEntry(characteristics,
+                                      ACAMERA_LENS_POSE_REFERENCE, &entry) ==
+            ACAMERA_OK &&
+        entry.count > 0) {
+      out->pose_reference = entry.data.u8[0];
     }
   }
 
@@ -275,6 +317,21 @@ bool CameraSource::SelectCamera(const CaptureConfig& config) {
                         camera_id_.c_str());
   }
 
+  if (info_.has_calibration) {
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "calibration: f %.1f %.1f, c %.1f %.1f, k %.4f %.4f "
+                        "%.4f, against %dx%d",
+                        info_.intrinsics[0], info_.intrinsics[1],
+                        info_.intrinsics[2], info_.intrinsics[3],
+                        info_.distortion[0], info_.distortion[1],
+                        info_.distortion[2], info_.pre_correction_array[2],
+                        info_.pre_correction_array[3]);
+  } else {
+    __android_log_print(ANDROID_LOG_WARN, kTag,
+                        "camera %s publishes no calibration",
+                        camera_id_.c_str());
+  }
+
   __android_log_print(ANDROID_LOG_INFO, kTag,
                       "using camera %s: %.1fmm, capture %dx%d, preview %dx%d, "
                       "orientation %d",
@@ -343,6 +400,21 @@ bool CameraSource::StartSession() {
 
   ACaptureRequest_addTarget(request_, capture_target_);
   ACaptureRequest_addTarget(request_, preview_target_);
+
+  // Stabilisation off, both kinds. Digital stabilisation crops and warps each
+  // frame independently and optical stabilisation moves the lens, so either one
+  // leaves a camera whose geometry changes frame to frame — which is the one
+  // thing a reconstruction assumes does not happen. What they buy is a steadier
+  // picture, and sharpness selection is already the answer to shake here.
+  const uint8_t video_stabilization =
+      ACAMERA_CONTROL_VIDEO_STABILIZATION_MODE_OFF;
+  ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_VIDEO_STABILIZATION_MODE,
+                              1, &video_stabilization);
+
+  const uint8_t optical_stabilization =
+      ACAMERA_LENS_OPTICAL_STABILIZATION_MODE_OFF;
+  ACaptureRequest_setEntry_u8(request_, ACAMERA_LENS_OPTICAL_STABILIZATION_MODE,
+                              1, &optical_stabilization);
 
   ACameraCaptureSession_stateCallbacks state{};
   state.context = this;

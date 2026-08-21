@@ -59,6 +59,36 @@ them — 90 on a Galaxy S25 Ultra.
 an ultra-wide and a periscope disagree about focal length by a factor of
 eight — so this is what says which one a session is.
 
+### Calibration
+
+Where the device publishes it, `session.json` carries the calibration the
+manufacturer measured:
+
+```json
+"intrinsics": [2826.88, 2830.44, 2024.93, 1519.77, 0],
+"distortion": [0.0602282, -0.0909693, 0.0396783, 0, 0],
+"pre_correction_active_array": [0, 0, 4080, 3060],
+```
+
+`[fx, fy, cx, cy, skew]` and `[k1, k2, k3, p1, p2]`, in pixels of
+`pre_correction_active_array` — which is not necessarily the frame size, so
+check before using them. On a Galaxy S25 Ultra it is exactly the capture size and
+no scaling is needed.
+
+Solving for intrinsics from the images alone wants wide coverage and many
+frames. Being handed them is worth having when a capture is sparse.
+
+`lens_pose_translation_m` and `lens_pose_rotation_xyzw` place the lens relative
+to `lens_pose_reference`. That reference is the primary camera on the tested
+device rather than the gyroscope, so it gives the offset between lenses and not
+a camera-to-IMU transform.
+
+**Stabilisation is turned off**, optical and digital both. Digital stabilisation
+crops and warps each frame on its own and optical stabilisation moves the lens;
+either leaves a camera whose geometry changes between frames, which is the one
+thing a reconstruction assumes does not happen. Sharpness selection is the
+answer to shake here instead.
+
 ### Inertial data
 
 Accelerometer and gyroscope at a requested 200Hz, unfiltered, one row per
