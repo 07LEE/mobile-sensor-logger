@@ -23,6 +23,11 @@ struct CameraInfo {
   float sensor_height_mm = 0.0f;
   bool logical_multi_camera = false;
 
+  // Where to put the lens so that everything from half that distance to
+  // infinity is acceptably sharp, in diopters. On a short focal length this is
+  // close enough to cover a room without ever hunting.
+  float hyperfocal_diopters = 0.0f;
+
   // The calibration the manufacturer measured for this lens, if the device
   // publishes it. Solving for intrinsics from the images alone needs wide
   // coverage and a lot of frames; being handed them is worth a great deal when

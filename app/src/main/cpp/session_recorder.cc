@@ -97,10 +97,13 @@ bool SessionRecorder::Start(const std::string& root,
   imu_.open(session_path_ + "/imu.csv", std::ios::out | std::ios::trunc);
   candidates_.open(session_path_ + "/candidates.csv",
                    std::ios::out | std::ios::trunc);
-  if (!frames_.is_open() || !imu_.is_open() || !candidates_.is_open()) {
+  capture_.open(session_path_ + "/capture.csv", std::ios::out | std::ios::trunc);
+  if (!frames_.is_open() || !imu_.is_open() || !candidates_.is_open() ||
+      !capture_.is_open()) {
     frames_.close();
     imu_.close();
     candidates_.close();
+    capture_.close();
     return false;
   }
 
@@ -109,6 +112,8 @@ bool SessionRecorder::Start(const std::string& root,
              "segment0_length,segment1_length,segment2_length\n";
   imu_ << "timestamp_ns,sensor,x,y,z\n";
   candidates_ << "timestamp_ns,sharpness,shift,residual\n";
+  capture_ << "timestamp_ns,exposure_ns,sensitivity,focus_diopters,ae_state,"
+              "awb_state,af_state,physical_id\n";
 
   motion_.Reset();
   motion_.SetThresholds(config.min_shift, config.min_residual);
@@ -185,6 +190,19 @@ void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
   imu_.flush();
 }
 
+void SessionRecorder::RecordCaptureResults(
+    const std::vector<CaptureResult>& results) {
+  if (!recording_ || results.empty()) return;
+
+  for (const CaptureResult& result : results) {
+    capture_ << result.timestamp_ns << ',' << result.exposure_ns << ','
+             << result.sensitivity << ',' << result.focus_distance << ','
+             << result.ae_state << ',' << result.awb_state << ','
+             << result.af_state << ',' << result.physical_id << '\n';
+  }
+  capture_.flush();
+}
+
 void SessionRecorder::WriteCandidate(int64_t timestamp_ns, float sharpness) {
   candidates_ << timestamp_ns << ',' << sharpness << ',' << motion_.last_shift()
               << ',' << motion_.last_residual() << '\n';
@@ -257,6 +275,7 @@ void SessionRecorder::Stop() {
   frames_.close();
   imu_.close();
   candidates_.close();
+  capture_.close();
   WriteManifest(last_timestamp_ns_);
   recording_ = false;
 }

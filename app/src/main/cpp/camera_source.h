@@ -6,6 +6,8 @@
 #include <media/NdkImageReader.h>
 
 #include <cstdint>
+#include <deque>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -13,6 +15,24 @@
 #include "capture_config.h"
 
 namespace sensor_logger {
+
+// What the camera reports about one frame after it has taken it.
+//
+// Everything here is a thing that can change between frames and that a
+// reconstruction assumes did not. Exposure and sensitivity move the brightness,
+// focus moves the effective focal length, and on a logical camera the lens
+// itself can change — each of which quietly invalidates a camera model solved
+// across the session. Recorded so it can be checked rather than hoped for.
+struct CaptureResult {
+  int64_t timestamp_ns = 0;
+  int64_t exposure_ns = 0;
+  int32_t sensitivity = 0;
+  float focus_distance = 0.0f;  // diopters; 0 is infinity
+  int32_t ae_state = -1;
+  int32_t awb_state = -1;
+  int32_t af_state = -1;
+  std::string physical_id;  // empty unless the camera is logical
+};
 
 // The rear camera, opened directly through the NDK.
 //
@@ -54,6 +74,29 @@ class CameraSource {
   // Same for the preview stream, which is read and dropped independently: the
   // screen wants the newest frame, and the recorder wants every frame.
   bool AcquirePreviewFrame(CameraImageView* out);
+
+  // Holds exposure, white balance and focus where they are.
+  //
+  // A reconstruction solves one camera across a whole session. Autofocus moves
+  // the effective focal length as it hunts, and auto exposure and white balance
+  // move the brightness and the colour, so all three break that assumption
+  // frame by frame. Locking them is what makes the images comparable.
+  //
+  // Called once the scene has been metered rather than at startup: the values
+  // are whatever the room needed, which is better than any number chosen in
+  // advance. Focus is the exception — it goes to the hyperfocal distance, where
+  // everything from half of it to infinity is acceptably sharp.
+  bool LockExposureAndFocus();
+
+  // Back to metering the scene. Called when a session ends so the next one
+  // locks to the room it is actually in rather than to the last one.
+  void UnlockExposureAndFocus();
+
+  bool is_locked() const { return locked_; }
+
+  // Moves the capture results that have arrived since the last call into `out`.
+  // They come in on a framework thread, so this is where they cross over.
+  void DrainResults(std::vector<CaptureResult>* out);
 
   // Throws away whatever the preview stream has produced. Called when nothing
   // is drawing it: the reader holds a fixed number of buffers and the camera
@@ -100,6 +143,8 @@ class CameraSource {
 
   std::string camera_id_;
   std::vector<std::string> rear_ids_;
+  bool locked_ = false;
+  float hyperfocal_diopters_ = 0.0f;
   float shortest_focal_mm_ = 0.0f;
   float longest_focal_mm_ = 0.0f;
   CameraInfo info_;
@@ -128,6 +173,13 @@ class CameraSource {
   // released when the next frame is taken.
   AImage* capture_image_ = nullptr;
   AImage* preview_image_ = nullptr;
+
+  static void OnCaptureCompleted(void* context, ACameraCaptureSession* session,
+                                 ACaptureRequest* request,
+                                 const ACameraMetadata* result);
+
+  std::mutex results_mutex_;
+  std::deque<CaptureResult> results_;
 };
 
 }  // namespace sensor_logger

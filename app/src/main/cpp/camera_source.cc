@@ -33,6 +33,20 @@ void OnError(void*, ACameraDevice*, int error) {
   __android_log_print(ANDROID_LOG_ERROR, kTag, "camera error %d", error);
 }
 
+// Results are kept only until the capture loop takes them. If it stops taking
+// them the camera is not being read either, and a queue that grew regardless
+// would be storing frames nobody is recording.
+constexpr size_t kMaxQueuedResults = 256;
+
+int32_t ReadU8(const ACameraMetadata* result, uint32_t tag) {
+  ACameraMetadata_const_entry entry{};
+  if (ACameraMetadata_getConstEntry(result, tag, &entry) != ACAMERA_OK ||
+      entry.count == 0) {
+    return -1;
+  }
+  return entry.data.u8[0];
+}
+
 void OnSessionReady(void*, ACameraCaptureSession*) {}
 void OnSessionActive(void*, ACameraCaptureSession*) {}
 void OnSessionClosed(void*, ACameraCaptureSession*) {}
@@ -40,6 +54,126 @@ void OnSessionClosed(void*, ACameraCaptureSession*) {}
 }  // namespace
 
 CameraSource::~CameraSource() { Stop(); }
+
+void CameraSource::OnCaptureCompleted(void* context, ACameraCaptureSession*,
+                                      ACaptureRequest*,
+                                      const ACameraMetadata* result) {
+  auto* self = static_cast<CameraSource*>(context);
+  if (self == nullptr || result == nullptr) return;
+
+  CaptureResult out;
+  ACameraMetadata_const_entry entry{};
+
+  // The timestamp is what ties this to the image; without it the row belongs to
+  // no frame in particular.
+  if (ACameraMetadata_getConstEntry(result, ACAMERA_SENSOR_TIMESTAMP, &entry) !=
+          ACAMERA_OK ||
+      entry.count == 0) {
+    return;
+  }
+  out.timestamp_ns = entry.data.i64[0];
+
+  if (ACameraMetadata_getConstEntry(result, ACAMERA_SENSOR_EXPOSURE_TIME,
+                                    &entry) == ACAMERA_OK &&
+      entry.count > 0) {
+    out.exposure_ns = entry.data.i64[0];
+  }
+  if (ACameraMetadata_getConstEntry(result, ACAMERA_SENSOR_SENSITIVITY,
+                                    &entry) == ACAMERA_OK &&
+      entry.count > 0) {
+    out.sensitivity = entry.data.i32[0];
+  }
+  if (ACameraMetadata_getConstEntry(result, ACAMERA_LENS_FOCUS_DISTANCE,
+                                    &entry) == ACAMERA_OK &&
+      entry.count > 0) {
+    out.focus_distance = entry.data.f[0];
+  }
+  if (ACameraMetadata_getConstEntry(
+          result, ACAMERA_LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID, &entry) ==
+          ACAMERA_OK &&
+      entry.count > 0) {
+    out.physical_id.assign(reinterpret_cast<const char*>(entry.data.u8),
+                           entry.count);
+    // The value is a null-terminated string inside a byte array.
+    const size_t end = out.physical_id.find('\0');
+    if (end != std::string::npos) out.physical_id.resize(end);
+  }
+
+  out.ae_state = ReadU8(result, ACAMERA_CONTROL_AE_STATE);
+  out.awb_state = ReadU8(result, ACAMERA_CONTROL_AWB_STATE);
+  out.af_state = ReadU8(result, ACAMERA_CONTROL_AF_STATE);
+
+  std::lock_guard<std::mutex> lock(self->results_mutex_);
+  if (self->results_.size() >= kMaxQueuedResults) self->results_.pop_front();
+  self->results_.push_back(std::move(out));
+}
+
+bool CameraSource::LockExposureAndFocus() {
+  if (session_ == nullptr || request_ == nullptr) return false;
+
+  const uint8_t on = 1;
+  ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AE_LOCK, 1, &on);
+  ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AWB_LOCK, 1, &on);
+
+  // Focus is set rather than locked. Locking autofocus keeps wherever it last
+  // hunted to, which is whatever happened to be under the lens at the time;
+  // the hyperfocal distance is a decision instead of an accident.
+  const uint8_t af_off = ACAMERA_CONTROL_AF_MODE_OFF;
+  ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AF_MODE, 1, &af_off);
+
+  if (hyperfocal_diopters_ > 0.0f) {
+    ACaptureRequest_setEntry_float(request_, ACAMERA_LENS_FOCUS_DISTANCE, 1,
+                                   &hyperfocal_diopters_);
+  }
+
+  ACameraCaptureSession_captureCallbacks callbacks{};
+  callbacks.context = this;
+  callbacks.onCaptureCompleted = OnCaptureCompleted;
+
+  if (ACameraCaptureSession_setRepeatingRequest(session_, &callbacks, 1,
+                                                &request_, nullptr) !=
+      ACAMERA_OK) {
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "could not lock the camera");
+    return false;
+  }
+
+  locked_ = true;
+  __android_log_print(ANDROID_LOG_INFO, kTag,
+                      "locked: exposure, white balance, focus at %.2f diopters "
+                      "(%.2fm)",
+                      hyperfocal_diopters_,
+                      hyperfocal_diopters_ > 0.0f ? 1.0f / hyperfocal_diopters_
+                                                  : 0.0f);
+  return true;
+}
+
+void CameraSource::UnlockExposureAndFocus() {
+  if (session_ == nullptr || request_ == nullptr || !locked_) return;
+
+  const uint8_t off = 0;
+  ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AE_LOCK, 1, &off);
+  ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AWB_LOCK, 1, &off);
+
+  const uint8_t af_continuous = ACAMERA_CONTROL_AF_MODE_CONTINUOUS_PICTURE;
+  ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AF_MODE, 1,
+                              &af_continuous);
+
+  ACameraCaptureSession_captureCallbacks callbacks{};
+  callbacks.context = this;
+  callbacks.onCaptureCompleted = OnCaptureCompleted;
+  ACameraCaptureSession_setRepeatingRequest(session_, &callbacks, 1, &request_,
+                                            nullptr);
+  locked_ = false;
+}
+
+void CameraSource::DrainResults(std::vector<CaptureResult>* out) {
+  out->clear();
+
+  std::lock_guard<std::mutex> lock(results_mutex_);
+  out->reserve(results_.size());
+  for (CaptureResult& result : results_) out->push_back(std::move(result));
+  results_.clear();
+}
 
 // Reads one camera's characteristics: what it is, and the two output sizes to
 // use if it is chosen.
@@ -70,6 +204,12 @@ bool CameraSource::ReadCamera(const char* id, ACameraMetadata* characteristics,
       entry.count >= 2) {
     out->sensor_width_mm = entry.data.f[0];
     out->sensor_height_mm = entry.data.f[1];
+  }
+  if (ACameraMetadata_getConstEntry(characteristics,
+                                    ACAMERA_LENS_INFO_HYPERFOCAL_DISTANCE,
+                                    &entry) == ACAMERA_OK &&
+      entry.count > 0) {
+    out->hyperfocal_diopters = entry.data.f[0];
   }
   if (ACameraMetadata_getConstEntry(characteristics, ACAMERA_SENSOR_ORIENTATION,
                                     &entry) == ACAMERA_OK &&
@@ -305,6 +445,7 @@ bool CameraSource::SelectCamera(const CaptureConfig& config) {
   }
 
   info_ = chosen->info;
+  hyperfocal_diopters_ = chosen->info.hyperfocal_diopters;
   camera_id_ = chosen->info.id;
   sensor_orientation_ = chosen->info.sensor_orientation;
   capture_width_ = chosen->capture_width;
@@ -440,7 +581,11 @@ bool CameraSource::StartSession() {
     return false;
   }
 
-  return ACameraCaptureSession_setRepeatingRequest(session_, nullptr, 1,
+  ACameraCaptureSession_captureCallbacks callbacks{};
+  callbacks.context = this;
+  callbacks.onCaptureCompleted = OnCaptureCompleted;
+
+  return ACameraCaptureSession_setRepeatingRequest(session_, &callbacks, 1,
                                                    &request_, nullptr) ==
          ACAMERA_OK;
 }
@@ -484,6 +629,12 @@ bool CameraSource::Start(const CaptureConfig& config) {
 }
 
 void CameraSource::Stop() {
+  locked_ = false;
+  {
+    std::lock_guard<std::mutex> lock(results_mutex_);
+    results_.clear();
+  }
+
   if (capture_image_ != nullptr) {
     AImage_delete(capture_image_);
     capture_image_ = nullptr;

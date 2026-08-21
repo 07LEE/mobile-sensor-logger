@@ -24,6 +24,7 @@ One directory per session under `<external files>/sessions/`:
 | `frames.csv` | `timestamp_ns, filename, width, height, sharpness, chroma_layout, luma_row_stride, chroma_row_stride, chroma_pixel_stride, segment0_length, segment1_length, segment2_length` |
 | `imu.csv` | `timestamp_ns, sensor, x, y, z` — `sensor` is `accel` or `gyro` |
 | `candidates.csv` | `timestamp_ns, sharpness, shift, residual` — one row per frame scored, kept or not |
+| `capture.csv` | `timestamp_ns, exposure_ns, sensitivity, focus_diopters, ae_state, awb_state, af_state, physical_id` — one row per frame the camera finished |
 | `session.json` | Which phone and camera it came from, counts, and units |
 
 Timestamps are nanoseconds, taken from the image rather than read on arrival, and
@@ -103,6 +104,29 @@ own schedules; interpolate as needed.
 Whether the camera shares their clock is not a given.
 `ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE` says, and it is logged at startup — when
 it is not `REALTIME` the two streams cannot be aligned at all.
+
+### Exposure, white balance and focus are held
+
+A reconstruction solves one camera across a whole session. Autofocus moves the
+effective focal length as it hunts, and auto exposure and white balance move the
+brightness and the colour, so all three break that assumption frame by frame.
+
+They are locked when recording starts rather than at startup: by then the camera
+has been metering the room for as long as it took to point the phone at it, and
+what it settled on is better than any number chosen in advance. Focus is the
+exception — it goes to the hyperfocal distance, where everything from half of
+that to infinity is acceptably sharp, which on a short focal length covers a
+room without ever hunting. Stopping a session releases them, so the next one
+meters the room it is actually in.
+
+`capture.csv` is how to check it held. On the tested device the lock takes 7
+frames, a quarter of a second, after which exposure, sensitivity and focus each
+hold a single value for the rest of the session. `ae_state` and `awb_state` of
+`3` mean locked; `af_state` of `0` means focus is not being driven.
+
+`physical_id` is which lens a logical camera was actually using, empty on a
+physical one. It is recorded because a logical camera can change lens on its own
+and take the intrinsics with it.
 
 ## Which frames are kept
 

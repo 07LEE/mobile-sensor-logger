@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "camera_image.h"
+#include "camera_source.h"
 #include "capture_config.h"
 #include "frame_motion.h"
 #include "frame_writer.h"
@@ -22,6 +23,7 @@ namespace sensor_logger {
 //   frames.csv       dimensions, plane strides and sharpness per written frame
 //   imu.csv          accelerometer and gyroscope readings
 //   candidates.csv   sharpness and motion of every frame that was scored
+//   capture.csv      exposure, sensitivity, focus and lens, per frame
 //   frames/          one raw YUV_420_888 file per written frame
 //
 // No poses. The device records what a reconstruction is computed from and
@@ -71,6 +73,11 @@ class SessionRecorder {
   // integration, and the volume is trivial next to the images.
   void RecordImu(const std::vector<ImuSample>& samples);
 
+  // What the camera reported about frames it has finished taking. Written
+  // whole rather than selected: these are the settings a reconstruction
+  // assumes held still, and the only way to know they did is to have them.
+  void RecordCaptureResults(const std::vector<CaptureResult>& results);
+
   // Writes any buffered frame, then closes the session.
   void Stop();
 
@@ -115,6 +122,7 @@ class SessionRecorder {
   std::ofstream frames_;
   std::ofstream imu_;
   std::ofstream candidates_;
+  std::ofstream capture_;
 
   FrameMotion motion_;
   PendingFrame pending_;

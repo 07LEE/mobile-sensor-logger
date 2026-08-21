@@ -266,6 +266,7 @@ constexpr int64_t kMinimumFreeBytes = 2LL * 1000 * 1000 * 1000;
 void ToggleRecording(AppState* state) {
   if (state->recorder.is_recording()) {
     state->recorder.Stop();
+    state->camera.UnlockExposureAndFocus();
     __android_log_print(ANDROID_LOG_INFO, kTag,
                         "stopped: %lld written, %lld considered, %lld dropped",
                         (long long)state->recorder.written_frames(),
@@ -284,6 +285,11 @@ void ToggleRecording(AppState* state) {
     LogError("not enough free space to start recording");
     return;
   }
+
+  // Locked before the first frame is kept, not at startup: by now the camera
+  // has been metering this room for as long as it took to point the phone at
+  // it, so what it settled on is what gets held.
+  state->camera.LockExposureAndFocus();
 
   if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
                             state->camera.info(), state->config)) {
@@ -384,10 +390,11 @@ std::vector<std::string> StatusLines(const AppState& state) {
                 state.config.min_residual * 100.0f);
   lines.emplace_back(buffer);
 
-  std::snprintf(buffer, sizeof(buffer), "%dX%d %s %s",
+  std::snprintf(buffer, sizeof(buffer), "%dX%d %s %s%s",
                 state.camera.capture_width(), state.camera.capture_height(),
                 state.camera.LensName(),
-                state.config.retention == Retention::kAll ? "ALL" : "SHARP");
+                state.config.retention == Retention::kAll ? "ALL" : "SHARP",
+                state.camera.is_locked() ? " LOCK" : "");
   lines.emplace_back(buffer);
 
   // Anything but zero in the first two means the capture is outrunning the
@@ -450,6 +457,7 @@ extern "C" void android_main(android_app* app) {
   FrameData frame;
   CameraImageView preview_image;
   std::vector<ImuSample> imu_samples;
+  std::vector<sensor_logger::CaptureResult> capture_results;
 
   while (true) {
     int events = 0;
@@ -489,6 +497,9 @@ extern "C" void android_main(android_app* app) {
     }
 
     if (!state.capturing) continue;
+
+    state.camera.DrainResults(&capture_results);
+    state.recorder.RecordCaptureResults(capture_results);
 
     if (state.camera.AcquireFrame(&frame)) {
       state.last_timestamp_ns = frame.timestamp_ns;
