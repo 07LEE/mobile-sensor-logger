@@ -28,6 +28,12 @@ struct CameraInfo {
   // close enough to cover a room without ever hunting.
   float hyperfocal_diopters = 0.0f;
 
+  // What the sensor will accept when it is driven by hand.
+  int64_t min_exposure_ns = 0;
+  int64_t max_exposure_ns = 0;
+  int32_t min_sensitivity = 0;
+  int32_t max_sensitivity = 0;
+
   // The calibration the manufacturer measured for this lens, if the device
   // publishes it. Solving for intrinsics from the images alone needs wide
   // coverage and a lot of frames; being handed them is worth a great deal when

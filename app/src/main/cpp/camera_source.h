@@ -31,6 +31,13 @@ struct CaptureResult {
   int32_t ae_state = -1;
   int32_t awb_state = -1;
   int32_t af_state = -1;
+
+  // How long the sensor takes to read from its first row to its last. Rolling
+  // shutter skews a frame by whatever the camera moved during that, and it is a
+  // property of the readout rather than of the exposure, so shortening the
+  // exposure does not reduce it. Recorded because correcting for it later needs
+  // the number.
+  int64_t rolling_shutter_skew_ns = 0;
   std::string physical_id;  // empty unless the camera is logical
 };
 
@@ -86,7 +93,11 @@ class CameraSource {
   // are whatever the room needed, which is better than any number chosen in
   // advance. Focus is the exception — it goes to the hyperfocal distance, where
   // everything from half of it to infinity is acceptably sharp.
-  bool LockExposureAndFocus();
+  // `metered` is what the camera settled on while it was free to choose, and
+  // `max_exposure_ns` caps how long the exposure may be; the sensitivity is
+  // raised to keep the same brightness. Zero takes the metered exposure as is.
+  bool LockExposureAndFocus(const CaptureResult& metered,
+                            int64_t max_exposure_ns, int32_t mains_hz);
 
   // Back to metering the scene. Called when a session ends so the next one
   // locks to the room it is actually in rather than to the last one.
@@ -144,6 +155,10 @@ class CameraSource {
   std::string camera_id_;
   std::vector<std::string> rear_ids_;
   bool locked_ = false;
+  int64_t min_exposure_ns_ = 0;
+  int64_t max_exposure_ns_ = 0;
+  int32_t min_sensitivity_ = 0;
+  int32_t max_sensitivity_ = 0;
   float hyperfocal_diopters_ = 0.0f;
   float shortest_focal_mm_ = 0.0f;
   float longest_focal_mm_ = 0.0f;

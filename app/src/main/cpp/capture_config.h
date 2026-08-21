@@ -26,6 +26,8 @@ enum class Retention {
 //   lens      = ultrawide | main | <camera id>
 //   shift     = 0.12        how far the picture may slide before a new frame
 //   residual  = 0.06        how much of it may stop matching
+//   shutter   = auto | 1/120  longest exposure allowed once locked
+//   mains     = 60 | 50 | off how often the lights pulse, for flicker
 //
 // Anything missing keeps its default. An unreadable file is not an error: the
 // defaults are a working configuration, and a capture that refused to start
@@ -65,6 +67,31 @@ struct CaptureConfig {
   // FrameMotion; these carry whatever the file said.
   float min_shift = 0.12f;
   float min_residual = 0.06f;
+
+  // The longest exposure allowed once the camera is locked, in nanoseconds, or
+  // 0 to take whatever the scene metered to.
+  //
+  // Motion blur is the exposure time multiplied by how fast the camera is
+  // turning, and a blurred frame is worse for a reconstruction than a noisy
+  // one: noise averages out across views and blur does not. Capping the
+  // exposure trades one for the other, since the sensitivity has to rise to
+  // compensate.
+  //
+  // It does nothing for rolling shutter, which is set by how long the sensor
+  // takes to read itself out and not by how long it was exposed.
+  int64_t max_exposure_ns = 0;
+
+  // Mains frequency in hertz, or 0 to ignore flicker.
+  //
+  // Lighting on alternating current pulses at twice the mains frequency, and a
+  // rolling shutter exposes each row at a different point in that cycle, so an
+  // exposure that is not a whole number of half-cycles bands the frame. Sixty
+  // hertz means 8.333ms; a capped exposure is rounded down to a multiple of it.
+  //
+  // The platform's own metering already does this — the exposures it chose on
+  // the tested device, 1/30 and 1/24, are both exact multiples — which is
+  // precisely the protection that setting the exposure by hand gives up.
+  int32_t mains_hz = 60;
 
   // Loads from `<directory>/capture.conf`. Returns false if there was no file,
   // which leaves every field at its default.

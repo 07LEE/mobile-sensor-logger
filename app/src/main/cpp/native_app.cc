@@ -295,7 +295,9 @@ void ToggleRecording(AppState* state) {
   // Locked before the first frame is kept, not at startup: by now the camera
   // has been metering this room for as long as it took to point the phone at
   // it, so what it settled on is what gets held.
-  state->camera.LockExposureAndFocus();
+  state->camera.LockExposureAndFocus(state->last_result,
+                                     state->config.max_exposure_ns,
+                                     state->config.mains_hz);
 
   if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
                             state->camera.info(), state->config)) {

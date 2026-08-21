@@ -99,6 +99,13 @@ void CameraSource::OnCaptureCompleted(void* context, ACameraCaptureSession*,
     if (end != std::string::npos) out.physical_id.resize(end);
   }
 
+  if (ACameraMetadata_getConstEntry(result,
+                                    ACAMERA_SENSOR_ROLLING_SHUTTER_SKEW,
+                                    &entry) == ACAMERA_OK &&
+      entry.count > 0) {
+    out.rolling_shutter_skew_ns = entry.data.i64[0];
+  }
+
   out.ae_state = ReadU8(result, ACAMERA_CONTROL_AE_STATE);
   out.awb_state = ReadU8(result, ACAMERA_CONTROL_AWB_STATE);
   out.af_state = ReadU8(result, ACAMERA_CONTROL_AF_STATE);
@@ -108,12 +115,60 @@ void CameraSource::OnCaptureCompleted(void* context, ACameraCaptureSession*,
   self->results_.push_back(std::move(out));
 }
 
-bool CameraSource::LockExposureAndFocus() {
+bool CameraSource::LockExposureAndFocus(const CaptureResult& metered,
+                                        int64_t max_exposure_ns,
+                                        int32_t mains_hz) {
   if (session_ == nullptr || request_ == nullptr) return false;
 
   const uint8_t on = 1;
-  ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AE_LOCK, 1, &on);
   ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AWB_LOCK, 1, &on);
+
+  // Shortening the exposure below what the scene metered to means driving the
+  // sensor by hand, which gives up the platform's own flicker handling — so
+  // that is done here instead. Otherwise the metered exposure is simply held,
+  // and the platform keeps doing it.
+  const bool cap = max_exposure_ns > 0 && metered.exposure_ns > max_exposure_ns;
+
+  if (!cap) {
+    ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AE_LOCK, 1, &on);
+  } else {
+    int64_t exposure = max_exposure_ns;
+
+    // Rounded down to a whole number of half-cycles of the lighting. An
+    // exposure that is not banded the frame, because a rolling shutter catches
+    // each row at a different point in the cycle.
+    if (mains_hz > 0) {
+      const int64_t half_cycle_ns = 1000000000LL / (2 * mains_hz);
+      const int64_t cycles = exposure / half_cycle_ns;
+      exposure = cycles > 0 ? cycles * half_cycle_ns : half_cycle_ns;
+    }
+
+    if (min_exposure_ns_ > 0 && exposure < min_exposure_ns_) {
+      exposure = min_exposure_ns_;
+    }
+
+    // The light the frame loses has to come back as sensitivity, or capping the
+    // exposure just makes every capture darker.
+    double sensitivity = static_cast<double>(metered.sensitivity) *
+                         static_cast<double>(metered.exposure_ns) /
+                         static_cast<double>(exposure);
+    if (max_sensitivity_ > 0 && sensitivity > max_sensitivity_) {
+      sensitivity = max_sensitivity_;
+    }
+    if (sensitivity < min_sensitivity_) sensitivity = min_sensitivity_;
+
+    const uint8_t ae_off = ACAMERA_CONTROL_AE_MODE_OFF;
+    const int32_t iso = static_cast<int32_t>(sensitivity + 0.5);
+    ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AE_MODE, 1, &ae_off);
+    ACaptureRequest_setEntry_i64(request_, ACAMERA_SENSOR_EXPOSURE_TIME, 1,
+                                 &exposure);
+    ACaptureRequest_setEntry_i32(request_, ACAMERA_SENSOR_SENSITIVITY, 1, &iso);
+
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "exposure capped: %lldns iso %d (metered %lldns iso %d)",
+                        (long long)exposure, iso,
+                        (long long)metered.exposure_ns, metered.sensitivity);
+  }
 
   // Focus is set rather than locked. Locking autofocus keeps wherever it last
   // hunted to, which is whatever happened to be under the lens at the time;
@@ -151,6 +206,8 @@ void CameraSource::UnlockExposureAndFocus() {
   if (session_ == nullptr || request_ == nullptr || !locked_) return;
 
   const uint8_t off = 0;
+  const uint8_t ae_on = ACAMERA_CONTROL_AE_MODE_ON;
+  ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AE_MODE, 1, &ae_on);
   ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AE_LOCK, 1, &off);
   ACaptureRequest_setEntry_u8(request_, ACAMERA_CONTROL_AWB_LOCK, 1, &off);
 
@@ -204,6 +261,20 @@ bool CameraSource::ReadCamera(const char* id, ACameraMetadata* characteristics,
       entry.count >= 2) {
     out->sensor_width_mm = entry.data.f[0];
     out->sensor_height_mm = entry.data.f[1];
+  }
+  if (ACameraMetadata_getConstEntry(characteristics,
+                                    ACAMERA_SENSOR_INFO_EXPOSURE_TIME_RANGE,
+                                    &entry) == ACAMERA_OK &&
+      entry.count >= 2) {
+    out->min_exposure_ns = entry.data.i64[0];
+    out->max_exposure_ns = entry.data.i64[1];
+  }
+  if (ACameraMetadata_getConstEntry(characteristics,
+                                    ACAMERA_SENSOR_INFO_SENSITIVITY_RANGE,
+                                    &entry) == ACAMERA_OK &&
+      entry.count >= 2) {
+    out->min_sensitivity = entry.data.i32[0];
+    out->max_sensitivity = entry.data.i32[1];
   }
   if (ACameraMetadata_getConstEntry(characteristics,
                                     ACAMERA_LENS_INFO_HYPERFOCAL_DISTANCE,
@@ -446,6 +517,10 @@ bool CameraSource::SelectCamera(const CaptureConfig& config) {
 
   info_ = chosen->info;
   hyperfocal_diopters_ = chosen->info.hyperfocal_diopters;
+  min_exposure_ns_ = chosen->info.min_exposure_ns;
+  max_exposure_ns_ = chosen->info.max_exposure_ns;
+  min_sensitivity_ = chosen->info.min_sensitivity;
+  max_sensitivity_ = chosen->info.max_sensitivity;
   camera_id_ = chosen->info.id;
   sensor_orientation_ = chosen->info.sensor_orientation;
   capture_width_ = chosen->capture_width;

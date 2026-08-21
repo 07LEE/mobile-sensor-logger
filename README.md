@@ -24,7 +24,7 @@ One directory per session under `<external files>/sessions/`:
 | `frames.csv` | `timestamp_ns, filename, width, height, sharpness, chroma_layout, luma_row_stride, chroma_row_stride, chroma_pixel_stride, segment0_length, segment1_length, segment2_length` |
 | `imu.csv` | `timestamp_ns, sensor, x, y, z` — `sensor` is `accel` or `gyro` |
 | `candidates.csv` | `timestamp_ns, sharpness, shift, residual` — one row per frame scored, kept or not |
-| `capture.csv` | `timestamp_ns, exposure_ns, sensitivity, focus_diopters, ae_state, awb_state, af_state, physical_id` — one row per frame the camera finished |
+| `capture.csv` | `timestamp_ns, exposure_ns, sensitivity, focus_diopters, rolling_shutter_skew_ns, ae_state, awb_state, af_state, physical_id` — one row per frame the camera finished |
 | `session.json` | Which phone and camera it came from, counts, and units |
 
 Timestamps are nanoseconds, taken from the image rather than read on arrival, and
@@ -128,6 +128,32 @@ hold a single value for the rest of the session. `ae_state` and `awb_state` of
 physical one. It is recorded because a logical camera can change lens on its own
 and take the intrinsics with it.
 
+`rolling_shutter_skew_ns` is how long the sensor takes to read from its first
+row to its last — 8.6ms on the tested device. A rolling shutter skews a frame by
+whatever the camera moved during that, and correcting for it later needs the
+number. It is a property of the readout, **not** of the exposure, so a shorter
+exposure does not reduce it.
+
+### Capping the exposure
+
+`shutter` shortens the exposure below what the scene metered to. Motion blur is
+the exposure multiplied by how fast the camera is turning, and a blurred frame
+is worse for a reconstruction than a noisy one: noise averages out across views
+and blur does not. The sensitivity rises to keep the brightness, so this trades
+one for the other — a 1/120 cap on a 1/30 scene quadrupled the ISO on the tested
+device.
+
+Shortening it means driving the sensor by hand, which gives up the platform's
+own flicker handling, so `mains` puts it back. Lighting on alternating current
+pulses at twice the mains frequency and a rolling shutter catches each row at a
+different point in that cycle, so an exposure that is not a whole number of
+half-cycles bands the frame. The cap is rounded down to a multiple of one: at
+60Hz that is 8.333ms, and 1/120 lands on it exactly.
+
+Left at `auto` the exposure is simply held wherever the scene metered, and the
+platform keeps doing this itself — the values it chose on the tested device,
+1/30 and 1/24, are both exact multiples of 8.333ms already.
+
 ## Which frames are kept
 
 Every frame is scored for sharpness — variance of the Laplacian over the luma
@@ -179,6 +205,8 @@ retention = sharpest | all      # selected frames, or every frame
 lens      = ultrawide | main | <camera id>
 shift     = 0.12                # how far the picture may slide before a frame
 residual  = 0.06                # how much of it may stop matching
+shutter   = auto | 1/120        # longest exposure allowed once locked
+mains     = 60 | 50 | off       # how often the lights pulse, for flicker
 ```
 
 ```bash

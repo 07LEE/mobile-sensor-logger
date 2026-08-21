@@ -83,6 +83,36 @@ bool CaptureConfig::Load(const std::string& directory) {
                             "'%s'",
                             key.c_str(), value.c_str());
       }
+    } else if (key == "shutter") {
+      if (value == "auto") {
+        max_exposure_ns = 0;
+      } else {
+        // Written the way a shutter speed is written: 1/120.
+        int denominator = 0;
+        if (std::sscanf(value.c_str(), "1/%d", &denominator) == 1 &&
+            denominator > 0) {
+          max_exposure_ns = 1000000000LL / denominator;
+        } else {
+          __android_log_print(ANDROID_LOG_WARN, kTag,
+                              "capture.conf: shutter wants auto or 1/N, got "
+                              "'%s'",
+                              value.c_str());
+        }
+      }
+    } else if (key == "mains") {
+      if (value == "off") {
+        mains_hz = 0;
+      } else {
+        const int hz = std::atoi(value.c_str());
+        if (hz == 50 || hz == 60) {
+          mains_hz = hz;
+        } else {
+          __android_log_print(ANDROID_LOG_WARN, kTag,
+                              "capture.conf: mains wants 50, 60 or off, got "
+                              "'%s'",
+                              value.c_str());
+        }
+      }
     } else if (key == "retention") {
       if (value == "all") {
         retention = Retention::kAll;
@@ -116,10 +146,19 @@ std::string CaptureConfig::Describe() const {
     std::snprintf(size, sizeof(size), "max");
   }
 
-  char buffer[128];
-  std::snprintf(buffer, sizeof(buffer), "%s %s lens %s shift %.3f residual %.3f",
+  char shutter[24];
+  if (max_exposure_ns > 0) {
+    std::snprintf(shutter, sizeof(shutter), "1/%lld",
+                  (long long)(1000000000LL / max_exposure_ns));
+  } else {
+    std::snprintf(shutter, sizeof(shutter), "auto");
+  }
+
+  char buffer[192];
+  std::snprintf(buffer, sizeof(buffer),
+                "%s %s lens %s shift %.3f residual %.3f shutter %s mains %d",
                 size, retention == Retention::kAll ? "all" : "sharpest",
-                lens_name, min_shift, min_residual);
+                lens_name, min_shift, min_residual, shutter, mains_hz);
   return buffer;
 }
 

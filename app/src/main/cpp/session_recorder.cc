@@ -112,8 +112,9 @@ bool SessionRecorder::Start(const std::string& root,
              "segment0_length,segment1_length,segment2_length\n";
   imu_ << "timestamp_ns,sensor,x,y,z\n";
   candidates_ << "timestamp_ns,sharpness,shift,residual\n";
-  capture_ << "timestamp_ns,exposure_ns,sensitivity,focus_diopters,ae_state,"
-              "awb_state,af_state,physical_id\n";
+  capture_ << "timestamp_ns,exposure_ns,sensitivity,focus_diopters,"
+              "rolling_shutter_skew_ns,ae_state,awb_state,af_state,"
+              "physical_id\n";
 
   motion_.Reset();
   motion_.SetThresholds(config.min_shift, config.min_residual);
@@ -197,8 +198,9 @@ void SessionRecorder::RecordCaptureResults(
   for (const CaptureResult& result : results) {
     capture_ << result.timestamp_ns << ',' << result.exposure_ns << ','
              << result.sensitivity << ',' << result.focus_distance << ','
-             << result.ae_state << ',' << result.awb_state << ','
-             << result.af_state << ',' << result.physical_id << '\n';
+             << result.rolling_shutter_skew_ns << ',' << result.ae_state << ','
+             << result.awb_state << ',' << result.af_state << ','
+             << result.physical_id << '\n';
   }
   capture_.flush();
 }
