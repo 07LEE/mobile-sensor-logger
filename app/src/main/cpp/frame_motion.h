@@ -32,11 +32,11 @@ namespace sensor_logger {
 class FrameMotion {
  public:
   // Fraction of the frame width the picture may slide before the stretch ends.
-  static constexpr float kDefaultMinShift = 0.06f;
+  static constexpr float kDefaultMinShift = 0.12f;
 
   // How much of the picture may fail to line up at the best offset, as a
   // fraction of full range, before the stretch ends regardless of the offset.
-  static constexpr float kDefaultMinResidual = 0.03f;
+  static constexpr float kDefaultMinResidual = 0.06f;
 
   FrameMotion() = default;
 

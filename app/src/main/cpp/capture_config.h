@@ -24,8 +24,8 @@ enum class Retention {
 //   capture   = max | 1920x1080
 //   retention = sharpest | all
 //   lens      = main | ultrawide | <camera id>
-//   shift     = 0.06        how far the picture may slide before a new frame
-//   residual  = 0.03        how much of it may stop matching
+//   shift     = 0.12        how far the picture may slide before a new frame
+//   residual  = 0.06        how much of it may stop matching
 //
 // Anything missing keeps its default. An unreadable file is not an error: the
 // defaults are a working configuration, and a capture that refused to start
@@ -55,8 +55,8 @@ struct CaptureConfig {
   // What ends a stretch of movement, and so how densely a capture is sampled.
   // Halving them roughly doubles the frames kept. Defaults live in
   // FrameMotion; these carry whatever the file said.
-  float min_shift = 0.06f;
-  float min_residual = 0.03f;
+  float min_shift = 0.12f;
+  float min_residual = 0.06f;
 
   // Loads from `<directory>/capture.conf`. Returns false if there was no file,
   // which leaves every field at its default.

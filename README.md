@@ -112,8 +112,8 @@ frame kept:
 
 | Column | Meaning | Default threshold |
 | --- | --- | --- |
-| `shift` | Best alignment offset, as a fraction of frame width | `0.06` |
-| `residual` | Mean difference remaining at that offset, `0`–`1` | `0.03` |
+| `shift` | Best alignment offset, as a fraction of frame width | `0.12` |
+| `residual` | Mean difference remaining at that offset, `0`–`1` | `0.06` |
 
 Either one crossing its threshold ends the stretch. `shift` catches panning and
 sideways movement; `residual` catches walking forward and rotating about the lens
@@ -135,8 +135,8 @@ default.
 capture   = max | 1920x1080     # largest the camera offers, or an exact size
 retention = sharpest | all      # selected frames, or every frame
 lens      = main | ultrawide | <camera id>
-shift     = 0.06                # how far the picture may slide before a frame
-residual  = 0.03                # how much of it may stop matching
+shift     = 0.12                # how far the picture may slide before a frame
+residual  = 0.06                # how much of it may stop matching
 ```
 
 ```bash
