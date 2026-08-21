@@ -236,6 +236,7 @@ than during one.
      |  2.9GB USED 111.0GB FREE |
      |  SHIFT 2/12  DIFF 4/6    |
      |  4080X3060 ULTRAWIDE ALL |
+     |  1/30 ISO247 0.91M LOCKED|
      |  DROP 0 NOIMG 0 IMU 36K  |
      |                          |
      |  [ ULTRAWIDE 2.2MM-TAP ] |
@@ -246,6 +247,10 @@ than during one.
 
 **Volume up** puts the camera on screen, filling it, with the numbers shrunk to
 a strip along the top. Volume up again takes it away.
+
+Shutter, sensitivity and focus distance are shown whether or not anything is
+being recorded, and `LOCKED` appears once they are held. Watching them settle is
+how the moment to start is chosen, and they only settle while nothing is locked.
 
 The button changes lens, and is only drawn where there is more than one rear
 camera to change between. It is the only thing a touch does, and it is refused

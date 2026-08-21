@@ -22,6 +22,7 @@ namespace {
 
 using sensor_logger::CameraImageView;
 using sensor_logger::CameraSource;
+using sensor_logger::CaptureResult;
 using sensor_logger::CaptureConfig;
 using sensor_logger::Retention;
 using sensor_logger::FrameData;
@@ -68,6 +69,11 @@ struct AppState {
   int64_t free_bytes = 0;
   int free_space_countdown = 0;
   int64_t last_timestamp_ns = 0;
+
+  // The camera's own account of the last frame it finished, kept whether or not
+  // anything is being recorded. Watching exposure and focus settle is how the
+  // decision to start is made, and they only settle while nothing is locked.
+  sensor_logger::CaptureResult last_result;
 
   // Why the last session ended, when it was not asked to. Shown until the next
   // one starts, since the reason is worth more at the moment of finding out
@@ -328,6 +334,22 @@ void NextLens(AppState* state) {
   state->last_timestamp_ns = 0;
 }
 
+// Shutter speed the way it is written on a camera, since 41621860 nanoseconds
+// is not a number anyone reads.
+std::string Shutter(int64_t exposure_ns) {
+  char buffer[24];
+  if (exposure_ns <= 0) {
+    std::snprintf(buffer, sizeof(buffer), "-");
+  } else if (exposure_ns < 500000000) {
+    std::snprintf(buffer, sizeof(buffer), "1/%lld",
+                  (long long)(1000000000LL / exposure_ns));
+  } else {
+    std::snprintf(buffer, sizeof(buffer), "%.1FS",
+                  static_cast<double>(exposure_ns) / 1e9);
+  }
+  return buffer;
+}
+
 // The readout drawn over the preview.
 //
 // These are the numbers that decide whether a capture is worth keeping, and
@@ -390,11 +412,26 @@ std::vector<std::string> StatusLines(const AppState& state) {
                 state.config.min_residual * 100.0f);
   lines.emplace_back(buffer);
 
-  std::snprintf(buffer, sizeof(buffer), "%dX%d %s %s%s",
+  std::snprintf(buffer, sizeof(buffer), "%dX%d %s %s",
                 state.camera.capture_width(), state.camera.capture_height(),
                 state.camera.LensName(),
-                state.config.retention == Retention::kAll ? "ALL" : "SHARP",
-                state.camera.is_locked() ? " LOCK" : "");
+                state.config.retention == Retention::kAll ? "ALL" : "SHARP");
+  lines.emplace_back(buffer);
+
+  // What the camera is doing with the picture, locked or not. Watching these
+  // settle is how the moment to start recording is chosen, so they are shown
+  // whether or not anything is being recorded.
+  const CaptureResult& result = state.last_result;
+  char focus[16];
+  if (result.focus_distance > 0.0f) {
+    std::snprintf(focus, sizeof(focus), "%.2FM", 1.0f / result.focus_distance);
+  } else {
+    std::snprintf(focus, sizeof(focus), "INF");
+  }
+
+  std::snprintf(buffer, sizeof(buffer), "%s ISO%d %s%s",
+                Shutter(result.exposure_ns).c_str(), result.sensitivity, focus,
+                state.camera.is_locked() ? " LOCKED" : "");
   lines.emplace_back(buffer);
 
   // Anything but zero in the first two means the capture is outrunning the
@@ -500,6 +537,7 @@ extern "C" void android_main(android_app* app) {
 
     state.camera.DrainResults(&capture_results);
     state.recorder.RecordCaptureResults(capture_results);
+    if (!capture_results.empty()) state.last_result = capture_results.back();
 
     if (state.camera.AcquireFrame(&frame)) {
       state.last_timestamp_ns = frame.timestamp_ns;
@@ -584,12 +622,15 @@ extern "C" void android_main(android_app* app) {
       constexpr int kColumns = 32;
       constexpr float kGap = 0.03f;
       const float button_height = 0.035f;
-      const float block = state.preview.StatusHeightFraction(kColumns) +
-                          (lens_choice ? kGap + button_height : 0.0f);
+      const std::vector<std::string> lines = StatusLines(state);
+      const float block =
+          state.preview.StatusHeightFraction(kColumns,
+                                             (int)lines.size()) +
+          (lens_choice ? kGap + button_height : 0.0f);
       const float top = (1.0f - block) * 0.5f;
 
       const float bottom = state.preview.DrawStatus(
-          StatusLines(state), state.recorder.is_recording(), top, kColumns);
+          lines, state.recorder.is_recording(), top, kColumns);
       if (lens_choice) {
         state.preview.DrawButton(lens_label, bottom + kGap,
                                  !state.recorder.is_recording());

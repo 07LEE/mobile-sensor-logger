@@ -69,7 +69,7 @@ constexpr Glyph kFont[] = {
 // The readout is rasterised into a fixed grid so the texture never has to be
 // reallocated; lines longer than this are cut off.
 constexpr int kTextColumns = 40;
-constexpr int kTextRows = 6;
+constexpr int kTextRows = 8;
 constexpr int kTextWidth = kTextColumns * kCellWidth;
 constexpr int kTextHeight = kTextRows * kCellHeight;
 
@@ -547,13 +547,14 @@ void PreviewRenderer::RasterizeText(const std::vector<std::string>& lines,
                   GL_UNSIGNED_BYTE, text_pixels_.data());
 }
 
-float PreviewRenderer::StatusHeightFraction(int columns) const {
+float PreviewRenderer::StatusHeightFraction(int columns, int rows) const {
   if (viewport_width_ <= 0 || viewport_height_ <= 0) return 0.0f;
   if (columns < 1) columns = 1;
+  if (rows > kTextRows) rows = kTextRows;
 
   const float scale = static_cast<float>(viewport_width_) * 0.96f /
                       static_cast<float>(columns * kCellWidth);
-  return static_cast<float>(kTextHeight) * scale /
+  return static_cast<float>(rows * kCellHeight) * scale /
          static_cast<float>(viewport_height_);
 }
 
@@ -577,9 +578,15 @@ float PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
   const float text_width_px =
       static_cast<float>(viewport_width_) * (1.0f - kInset);
 
+  const int rows = static_cast<int>(lines.size()) < kTextRows
+                       ? static_cast<int>(lines.size())
+                       : kTextRows;
+
   const float used = static_cast<float>(columns) / kTextColumns;
+  const float used_rows = static_cast<float>(rows) / kTextRows;
   const float scale = text_width_px / static_cast<float>(columns * kCellWidth);
-  const float panel_height_px = static_cast<float>(kTextHeight) * scale;
+  const float panel_height_px =
+      static_cast<float>(rows * kCellHeight) * scale;
 
   const float panel_top = 1.0f - 2.0f * top_fraction;
   const float panel_bottom =
@@ -588,7 +595,8 @@ float PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
   const float left = -1.0f + kInset;
   const float right = 1.0f - kInset;
 
-  const float kFullUvs[8] = {0.0f, 1.0f, used, 1.0f, 0.0f, 0.0f, used, 0.0f};
+  const float kFullUvs[8] = {0.0f,      used_rows, used, used_rows,
+                             0.0f,      0.0f,      used, 0.0f};
 
   glActiveTexture(GL_TEXTURE0);
   glUseProgram(quad_program_);

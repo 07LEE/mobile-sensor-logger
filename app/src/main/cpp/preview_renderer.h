@@ -63,7 +63,7 @@ class PreviewRenderer {
                    float top_fraction, int columns);
 
   // How tall that block will be, for working out where to start it.
-  float StatusHeightFraction(int columns) const;
+  float StatusHeightFraction(int columns, int rows) const;
 
   // Draws a labelled button at `top_fraction` down the screen and remembers
   // where it landed. `enabled` greys it out; it is still drawn, because a
