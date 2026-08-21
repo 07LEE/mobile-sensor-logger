@@ -19,7 +19,7 @@ One directory per session under `<external files>/sessions/`:
 | `poses.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, fx, fy, cx, cy, image_width, image_height` |
 | `points.csv` | `timestamp_ns, x, y, z, confidence` |
 | `imu.csv` | `timestamp_ns, sensor, x, y, z` — `sensor` is `accel` or `gyro` |
-| `candidates.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, sharpness, point_count, median_point_distance_m` |
+| `candidates.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, sharpness, point_count, median_point_distance_m, translation_threshold_m` |
 | `session.json` | Frame counts and the pose convention |
 
 Poses are in ARCore's right-handed world frame, rotation as a quaternion in
@@ -82,12 +82,29 @@ frame is megabytes at capture resolution and the camera produces thirty a
 second, so the disk runs out long before a useful capture is finished. Scoring
 on the phone keeps the choice while writing one frame per viewpoint.
 
-A stretch ends once the camera has moved 5cm or turned about 6 degrees, at which
-point that stretch's best frame is written and the next begins. Holding the
-phone still writes nothing after the first frame; sweeping it writes steadily.
-The thresholds are in `keyframe_selector.h` and the subsampling step is in
-`session_recorder.cc`. Both are guesses: captures have been run, but neither
-value has been tuned against the reconstruction it is meant to feed.
+**A stretch ends on angle, not on distance.** Sideways movement is measured as
+the angle it turns the scene through: five centimetres beside a desk is a
+genuinely different view of the subject, and five centimetres beside a far wall
+is the same photograph. A threshold in metres cannot tell those apart, so it
+over-samples across a room and under-samples up close — backwards on both
+counts, since close-up work is where detail has to survive and walking across a
+room is where the disk fills up. Walking a large space at a fixed 5cm would have
+written about twenty frames a second.
+
+How far away the scene is comes from the median distance to the feature points
+ARCore is tracking, clamped to a sane range so a few points on a blank wall
+cannot move the threshold by an order of magnitude. The current value is on
+screen during a capture, since it is how far to move for the next viewpoint and
+it is no longer a number to memorise.
+
+Turning in place is a separate criterion at about 6 degrees, because it changes
+what is in view while producing no parallax at all.
+
+The defaults are in `keyframe_selector.h` and the subsampling step is in
+`session_recorder.cc`. They remain guesses: wider baselines reconstruct from
+fewer frames but eventually stop matching, and where that line falls has not
+been tested against a real capture. `candidates.csv` is what makes testing it
+possible without re-shooting.
 
 The score is in `frames.csv`. It has no absolute meaning — it moves with scene
 content and exposure — so it is only comparable between frames of the same scene
@@ -155,6 +172,14 @@ beyond the licence of this repository. They permit commercial use and require no
 source disclosure, but they do place obligations on anything shipped: users must
 be told the app includes ARCore, and be given Google's terms and privacy policy.
 Read them before distributing a build.
+
+Feature points that are not finite are dropped before anything sees them.
+Captures have come back with most of the point cloud as NaN — scattered through
+it rather than at one end, and permanent once it starts. Whether ARCore produces
+those or this reads them wrong is still open, so the ratio is logged rather than
+passed over. A NaN reaching the keyframe rule would be worse than a lost point:
+every comparison against NaN is false, so the movement criterion would stop
+firing without any sign of it.
 
 ## Status
 

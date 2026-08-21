@@ -82,10 +82,20 @@ class SessionRecorder {
   int64_t untracked_frames() const { return untracked_frames_; }
   int64_t frames_without_image() const { return frames_without_image_; }
   int64_t imu_samples() const { return imu_samples_; }
+
+  // How far away the scene was on the last scored frame, and the sideways
+  // movement that currently closes a stretch. Both are on screen during a
+  // capture: the second is how far to move for the next viewpoint, and it is
+  // not a fixed number any more.
+  float scene_distance_m() const { return scene_distance_m_; }
+  float translation_threshold_m() const {
+    return selector_.translation_threshold_m();
+  }
   const std::string& session_path() const { return session_path_; }
 
  private:
-  void WriteCandidate(const FrameData& frame, float sharpness);
+  void WriteCandidate(const FrameData& frame, float sharpness,
+                     float scene_distance_m);
   void FlushPending();
 
   // Both run on the writer thread. Nothing else touches poses_, points_,
@@ -119,6 +129,7 @@ class SessionRecorder {
   int64_t considered_frames_ = 0;
   int64_t untracked_frames_ = 0;
   int64_t imu_samples_ = 0;
+  float scene_distance_m_ = 0.0f;
 };
 
 }  // namespace sensor_logger

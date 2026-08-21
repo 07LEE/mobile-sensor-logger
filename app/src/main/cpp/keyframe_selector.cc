@@ -1,5 +1,6 @@
 #include "keyframe_selector.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace sensor_logger {
@@ -29,14 +30,29 @@ float RotationAngle(const CameraPose& a, const CameraPose& b) {
 
 }  // namespace
 
-bool KeyframeSelector::Accept(const CameraPose& pose) {
+float KeyframeSelector::translation_threshold_m() const {
+  // Small-angle: the sideways movement subtending `min_parallax_rad_` at the
+  // scene is the distance times the tangent of it.
+  return scene_distance_m_ * std::tan(min_parallax_rad_);
+}
+
+bool KeyframeSelector::Accept(const CameraPose& pose, float scene_distance_m) {
+  // A distance that is zero, negative or not a number leaves the last usable
+  // one in place. Comparisons against NaN are all false, so letting one through
+  // would silently switch the sideways-movement criterion off for good.
+  if (std::isfinite(scene_distance_m) && scene_distance_m > 0.0f) {
+    scene_distance_m_ = std::clamp(scene_distance_m, kMinSceneDistanceM,
+                                   kMaxSceneDistanceM);
+  }
+
   if (!has_reference_) {
     reference_ = pose;
     has_reference_ = true;
     return true;
   }
 
-  const bool moved = TranslationDistance(pose, reference_) >= min_translation_m_;
+  const bool moved =
+      TranslationDistance(pose, reference_) >= translation_threshold_m();
   const bool turned = RotationAngle(pose, reference_) >= min_rotation_rad_;
 
   if (!moved && !turned) {
@@ -51,6 +67,7 @@ bool KeyframeSelector::Accept(const CameraPose& pose) {
 void KeyframeSelector::Reset() {
   has_reference_ = false;
   reference_ = CameraPose{};
+  scene_distance_m_ = kAssumedSceneDistanceM;
   rejected_ = 0;
 }
 

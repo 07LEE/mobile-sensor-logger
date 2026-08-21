@@ -305,7 +305,13 @@ std::vector<std::string> StatusLines(const AppState& state,
     lines.emplace_back(buffer);
   }
 
-  std::snprintf(buffer, sizeof(buffer), "POINTS %d", (int)frame.point_cloud.size());
+  // The step is what to act on while filming: it is how far to move for the
+  // next viewpoint, and it follows how far away the scene is rather than being
+  // a fixed number to memorise.
+  std::snprintf(buffer, sizeof(buffer), "SCENE %.1FM  STEP %.0FCM  POINTS %d",
+                recorder.scene_distance_m(),
+                recorder.translation_threshold_m() * 100.0f,
+                (int)frame.point_cloud.size());
   lines.emplace_back(buffer);
 
   std::snprintf(buffer, sizeof(buffer), "IMU %lld SAMPLES",

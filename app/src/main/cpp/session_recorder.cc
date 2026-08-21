@@ -42,7 +42,9 @@ float MedianPointDistance(const FrameData& frame, std::vector<float>* scratch) {
 
   const size_t middle = scratch->size() / 2;
   std::nth_element(scratch->begin(), scratch->begin() + middle, scratch->end());
-  return (*scratch)[middle];
+
+  const float median = (*scratch)[middle];
+  return std::isfinite(median) ? median : 0.0f;
 }
 
 bool MakeDirectory(const std::string& path) {
@@ -114,7 +116,7 @@ bool SessionRecorder::Start(const std::string& root,
   points_ << "timestamp_ns,x,y,z,confidence\n";
   imu_ << "timestamp_ns,sensor,x,y,z\n";
   candidates_ << "timestamp_ns,tx,ty,tz,qx,qy,qz,qw,sharpness,point_count,"
-                 "median_point_distance_m\n";
+                 "median_point_distance_m,translation_threshold_m\n";
   frames_ << "timestamp_ns,filename,width,height,sharpness,chroma_layout,"
              "luma_row_stride,chroma_row_stride,chroma_pixel_stride,"
              "segment0_length,segment1_length,segment2_length\n";
@@ -158,11 +160,15 @@ void SessionRecorder::Record(const FrameData& frame) {
       LumaSharpness(luma.data, frame.image.width, frame.image.height,
                     luma.row_stride, kSharpnessStep);
 
-  WriteCandidate(frame, sharpness);
+  const float scene_distance =
+      MedianPointDistance(frame, &distance_scratch_);
+  scene_distance_m_ = scene_distance;
+
+  WriteCandidate(frame, sharpness, scene_distance);
 
   // Moving past the threshold closes the current stretch: whatever the sharpest
   // frame in it turned out to be is written now, and this frame opens the next.
-  if (selector_.Accept(frame.pose)) {
+  if (selector_.Accept(frame.pose, scene_distance)) {
     FlushPending();
     pending_.Set(frame, sharpness);
     return;
@@ -185,14 +191,16 @@ void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
   imu_.flush();
 }
 
-void SessionRecorder::WriteCandidate(const FrameData& frame, float sharpness) {
+void SessionRecorder::WriteCandidate(const FrameData& frame, float sharpness,
+                                    float scene_distance_m) {
   const CameraPose& pose = frame.pose;
   candidates_ << frame.timestamp_ns << ',' << pose.translation[0] << ','
               << pose.translation[1] << ',' << pose.translation[2] << ','
               << pose.rotation[0] << ',' << pose.rotation[1] << ','
               << pose.rotation[2] << ',' << pose.rotation[3] << ','
               << sharpness << ',' << frame.point_cloud.size() << ','
-              << MedianPointDistance(frame, &distance_scratch_) << '\n';
+              << scene_distance_m << ','
+              << selector_.translation_threshold_m() << '\n';
   candidates_.flush();
 }
 

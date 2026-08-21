@@ -2,6 +2,7 @@
 
 #include <android/log.h>
 
+#include <cmath>
 #include <cstddef>
 #include <utility>
 
@@ -334,10 +335,33 @@ void ArSession::ReadPointCloud(std::vector<FeaturePoint>* out) const {
   if (data == nullptr) return;
 
   // Four floats per point: position then a confidence in [0, 1].
+  //
+  // Points that are not finite are dropped. Captures have come back with most
+  // of the cloud as NaN — scattered through it rather than at one end, and
+  // permanent once it starts — and whatever the cause, such a point means
+  // nothing to anything downstream. Worse, one reaching the keyframe rule turns
+  // the scene distance into NaN, and every comparison against NaN is false, so
+  // the sideways-movement criterion would quietly stop firing at all.
   out->reserve(static_cast<size_t>(count));
+  int32_t dropped = 0;
   for (int32_t i = 0; i < count; ++i) {
     const float* p = data + i * 4;
+    if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) {
+      ++dropped;
+      continue;
+    }
     out->push_back(FeaturePoint{p[0], p[1], p[2], p[3]});
+  }
+
+  // Reported rather than passed over: whether ARCore is producing these or this
+  // is reading them wrong is still open, and the ratio is the evidence.
+  if (dropped > 0) {
+    static int64_t reported = 0;
+    if (++reported % 30 == 0) {
+      __android_log_print(ANDROID_LOG_WARN, kTag,
+                          "point cloud: %d of %d points not finite", dropped,
+                          count);
+    }
   }
 }
 
