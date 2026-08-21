@@ -40,16 +40,150 @@ void OnSessionClosed(void*, ACameraCaptureSession*) {}
 
 CameraSource::~CameraSource() { Stop(); }
 
-bool CameraSource::SelectCamera(int32_t requested_width,
-                                int32_t requested_height) {
+// Reads one camera's characteristics: what it is, and the two output sizes to
+// use if it is chosen.
+bool CameraSource::ReadCamera(const char* id, ACameraMetadata* characteristics,
+                              const CaptureConfig& config, CameraInfo* out,
+                              int32_t* capture_width, int32_t* capture_height,
+                              int32_t* preview_width,
+                              int32_t* preview_height) const {
+  ACameraMetadata_const_entry entry{};
+
+  out->id = id;
+
+  if (ACameraMetadata_getConstEntry(characteristics,
+                                    ACAMERA_LENS_INFO_AVAILABLE_FOCAL_LENGTHS,
+                                    &entry) == ACAMERA_OK &&
+      entry.count > 0) {
+    out->focal_length_mm = entry.data.f[0];
+  }
+  if (ACameraMetadata_getConstEntry(characteristics,
+                                    ACAMERA_LENS_INFO_AVAILABLE_APERTURES,
+                                    &entry) == ACAMERA_OK &&
+      entry.count > 0) {
+    out->aperture = entry.data.f[0];
+  }
+  if (ACameraMetadata_getConstEntry(characteristics,
+                                    ACAMERA_SENSOR_INFO_PHYSICAL_SIZE,
+                                    &entry) == ACAMERA_OK &&
+      entry.count >= 2) {
+    out->sensor_width_mm = entry.data.f[0];
+    out->sensor_height_mm = entry.data.f[1];
+  }
+  if (ACameraMetadata_getConstEntry(characteristics, ACAMERA_SENSOR_ORIENTATION,
+                                    &entry) == ACAMERA_OK &&
+      entry.count > 0) {
+    out->sensor_orientation = entry.data.i32[0];
+  }
+  if (ACameraMetadata_getConstEntry(characteristics,
+                                    ACAMERA_REQUEST_AVAILABLE_CAPABILITIES,
+                                    &entry) == ACAMERA_OK) {
+    for (uint32_t i = 0; i < entry.count; ++i) {
+      if (entry.data.u8[i] ==
+          ACAMERA_REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) {
+        out->logical_multi_camera = true;
+      }
+    }
+  }
+
+  // Whether this camera's timestamps share a clock with the sensors. When they
+  // do not, nothing in software can line the image and inertial streams up, and
+  // a capture that looks fine is unusable for anything inertial.
+  const bool realtime =
+      ACameraMetadata_getConstEntry(characteristics,
+                                    ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE,
+                                    &entry) == ACAMERA_OK &&
+      entry.count > 0 &&
+      entry.data.u8[0] == ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME;
+  if (!realtime) {
+    __android_log_print(ANDROID_LOG_WARN, kTag,
+                        "camera %s timestamp source is not REALTIME", id);
+  }
+
+  std::vector<std::pair<int32_t, int32_t>> sizes;
+  if (ACameraMetadata_getConstEntry(
+          characteristics, ACAMERA_SCALER_AVAILABLE_STREAM_CONFIGURATIONS,
+          &entry) == ACAMERA_OK) {
+    for (uint32_t e = 0; e + 3 < entry.count; e += 4) {
+      if (entry.data.i32[e] != AIMAGE_FORMAT_YUV_420_888 ||
+          entry.data.i32[e + 3] !=
+              ACAMERA_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT) {
+        continue;
+      }
+      sizes.emplace_back(entry.data.i32[e + 1], entry.data.i32[e + 2]);
+    }
+  }
+  if (sizes.empty()) return false;
+
+  *capture_width = 0;
+  *capture_height = 0;
+
+  // What was asked for, if this camera has it exactly. Falling back silently to
+  // a different resolution would be worse than ignoring the setting.
+  for (const auto& size : sizes) {
+    if (size.first == config.capture_width &&
+        size.second == config.capture_height) {
+      *capture_width = size.first;
+      *capture_height = size.second;
+      break;
+    }
+  }
+  if (*capture_width == 0) {
+    for (const auto& size : sizes) {
+      if (static_cast<int64_t>(size.first) * size.second >
+          static_cast<int64_t>(*capture_width) * *capture_height) {
+        *capture_width = size.first;
+        *capture_height = size.second;
+      }
+    }
+  }
+
+  // The preview is the largest size under the cap *with the same shape as the
+  // capture*. Devices offer several aspect ratios, and the largest that fits is
+  // often not the capture's — which would put a different field of view on
+  // screen from the one being recorded, on the one display whose job is showing
+  // what is being recorded. It is also what limits the frame rate: at capture
+  // rate this is uploaded every frame.
+  const float capture_aspect =
+      static_cast<float>(*capture_width) / *capture_height;
+  *preview_width = 0;
+  *preview_height = 0;
+  for (const auto& size : sizes) {
+    if (size.first > kMaxPreviewWidth || size.second <= 0) continue;
+    if (std::fabs(static_cast<float>(size.first) / size.second -
+                  capture_aspect) > 0.02f) {
+      continue;
+    }
+    if (static_cast<int64_t>(size.first) * size.second >
+        static_cast<int64_t>(*preview_width) * *preview_height) {
+      *preview_width = size.first;
+      *preview_height = size.second;
+    }
+  }
+  if (*preview_width == 0) {
+    *preview_width = *capture_width;
+    *preview_height = *capture_height;
+  }
+
+  out->width = *capture_width;
+  out->height = *capture_height;
+  return true;
+}
+
+bool CameraSource::SelectCamera(const CaptureConfig& config) {
   ACameraIdList* ids = nullptr;
   if (ACameraManager_getCameraIdList(manager_, &ids) != ACAMERA_OK ||
       ids == nullptr) {
     return false;
   }
 
-  bool found = false;
-  for (int i = 0; i < ids->numCameras && !found; ++i) {
+  struct Candidate {
+    CameraInfo info;
+    int32_t capture_width, capture_height, preview_width, preview_height;
+  };
+  std::vector<Candidate> back;
+
+  for (int i = 0; i < ids->numCameras; ++i) {
     ACameraMetadata* characteristics = nullptr;
     if (ACameraManager_getCameraCharacteristics(manager_, ids->cameraIds[i],
                                                 &characteristics) !=
@@ -58,133 +192,95 @@ bool CameraSource::SelectCamera(int32_t requested_width,
     }
 
     ACameraMetadata_const_entry facing{};
-    if (ACameraMetadata_getConstEntry(characteristics, ACAMERA_LENS_FACING,
+    const bool is_back =
+        ACameraMetadata_getConstEntry(characteristics, ACAMERA_LENS_FACING,
                                       &facing) == ACAMERA_OK &&
-        facing.count > 0 &&
-        facing.data.u8[0] == ACAMERA_LENS_FACING_BACK) {
-      camera_id_ = ids->cameraIds[i];
+        facing.count > 0 && facing.data.u8[0] == ACAMERA_LENS_FACING_BACK;
 
-      // Whether the camera's timestamps share a clock with the sensors. When
-      // this is not REALTIME nothing in software can line the two streams up,
-      // and a capture that looks fine will be unusable for anything inertial —
-      // worth knowing at startup rather than at the workstation.
-      ACameraMetadata_const_entry clock{};
-      const bool realtime =
-          ACameraMetadata_getConstEntry(characteristics,
-                                        ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE,
-                                        &clock) == ACAMERA_OK &&
-          clock.count > 0 &&
-          clock.data.u8[0] == ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME;
-      __android_log_print(realtime ? ANDROID_LOG_INFO : ANDROID_LOG_WARN, kTag,
-                          "camera %s timestamp source: %s",
-                          ids->cameraIds[i], realtime ? "REALTIME" : "UNKNOWN");
-
-      ACameraMetadata_const_entry orientation{};
-      if (ACameraMetadata_getConstEntry(characteristics,
-                                        ACAMERA_SENSOR_ORIENTATION,
-                                        &orientation) == ACAMERA_OK &&
-          orientation.count > 0) {
-        sensor_orientation_ = orientation.data.i32[0];
+    if (is_back) {
+      Candidate candidate{};
+      if (ReadCamera(ids->cameraIds[i], characteristics, config,
+                     &candidate.info, &candidate.capture_width,
+                     &candidate.capture_height, &candidate.preview_width,
+                     &candidate.preview_height)) {
+        // Every rear camera is logged, not just the one chosen. A phone has
+        // several lenses of very different focal length and only some are
+        // offered to applications; which is which is worth being able to read.
+        __android_log_print(
+            ANDROID_LOG_INFO, kTag,
+            "camera %s: %.1fmm f/%.1f, yuv up to %dx%d%s",
+            candidate.info.id.c_str(), candidate.info.focal_length_mm,
+            candidate.info.aperture, candidate.capture_width,
+            candidate.capture_height,
+            candidate.info.logical_multi_camera ? ", logical" : "");
+        back.push_back(std::move(candidate));
       }
-
-      // Every YUV output size the device offers is logged, not just the ones
-      // chosen. When a capture comes back smaller than expected this is the
-      // first thing worth reading.
-      std::vector<std::pair<int32_t, int32_t>> sizes;
-
-      ACameraMetadata_const_entry configs{};
-      if (ACameraMetadata_getConstEntry(
-              characteristics, ACAMERA_SCALER_AVAILABLE_STREAM_CONFIGURATIONS,
-              &configs) == ACAMERA_OK) {
-        for (uint32_t e = 0; e + 3 < configs.count; e += 4) {
-          const int32_t format = configs.data.i32[e];
-          const int32_t width = configs.data.i32[e + 1];
-          const int32_t height = configs.data.i32[e + 2];
-          const int32_t direction = configs.data.i32[e + 3];
-
-          if (format != AIMAGE_FORMAT_YUV_420_888 ||
-              direction !=
-                  ACAMERA_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT) {
-            continue;
-          }
-
-          __android_log_print(ANDROID_LOG_INFO, kTag, "camera %s: yuv %dx%d",
-                              camera_id_.c_str(), width, height);
-          sizes.emplace_back(width, height);
-        }
-      }
-
-      // Capture: what was asked for if the camera has it, otherwise the
-      // largest, since that resolution caps the detail any later processing can
-      // recover.
-      for (const auto& size : sizes) {
-        if (size.first == requested_width && size.second == requested_height) {
-          capture_width_ = size.first;
-          capture_height_ = size.second;
-          break;
-        }
-      }
-
-      if (capture_width_ == 0) {
-        if (requested_width > 0) {
-          __android_log_print(ANDROID_LOG_WARN, kTag,
-                              "camera does not offer %dx%d; using the largest",
-                              requested_width, requested_height);
-        }
-        for (const auto& size : sizes) {
-          if (static_cast<int64_t>(size.first) * size.second >
-              static_cast<int64_t>(capture_width_) * capture_height_) {
-            capture_width_ = size.first;
-            capture_height_ = size.second;
-          }
-        }
-      }
-
-      // Preview: the largest under the cap *with the same shape as the
-      // capture*. A device offers sizes in several aspect ratios, and the
-      // largest that fits is often not one of the capture's — which would put a
-      // different field of view on screen from the one being recorded, in the
-      // one place whose whole job is showing what is being recorded.
-      const float capture_aspect =
-          capture_height_ > 0
-              ? static_cast<float>(capture_width_) / capture_height_
-              : 0.0f;
-
-      for (const auto& size : sizes) {
-        if (size.first > kMaxPreviewWidth || size.second <= 0) continue;
-
-        const float aspect = static_cast<float>(size.first) / size.second;
-        if (std::fabs(aspect - capture_aspect) > 0.02f) continue;
-
-        if (static_cast<int64_t>(size.first) * size.second >
-            static_cast<int64_t>(preview_width_) * preview_height_) {
-          preview_width_ = size.first;
-          preview_height_ = size.second;
-        }
-      }
-
-      found = capture_width_ > 0;
     }
 
     ACameraMetadata_free(characteristics);
   }
 
   ACameraManager_deleteCameraIdList(ids);
+  if (back.empty()) return false;
 
-  if (!found) return false;
+  const Candidate* chosen = &back.front();
 
-  // A device with nothing matching under the cap can still be previewed from
-  // the capture stream; it costs upload bandwidth but it is not a failure, and
-  // the shape on screen is right by construction.
-  if (preview_width_ == 0) {
-    preview_width_ = capture_width_;
-    preview_height_ = capture_height_;
+  if (config.lens == Lens::kUltrawide) {
+    // The shortest focal length there is. Also a physical camera rather than a
+    // logical one on the tested device, so the lens cannot change mid-session.
+    for (const Candidate& candidate : back) {
+      if (candidate.info.focal_length_mm > 0.0f &&
+          (chosen->info.focal_length_mm <= 0.0f ||
+           candidate.info.focal_length_mm < chosen->info.focal_length_mm)) {
+        chosen = &candidate;
+      }
+    }
+  } else if (config.lens == Lens::kExplicit) {
+    const Candidate* named = nullptr;
+    for (const Candidate& candidate : back) {
+      if (candidate.info.id == config.lens_id) named = &candidate;
+    }
+    if (named != nullptr) {
+      chosen = named;
+    } else {
+      __android_log_print(ANDROID_LOG_WARN, kTag,
+                          "no rear camera '%s'; using %s",
+                          config.lens_id.c_str(), chosen->info.id.c_str());
+    }
+  }
+
+  info_ = chosen->info;
+  camera_id_ = chosen->info.id;
+  sensor_orientation_ = chosen->info.sensor_orientation;
+  capture_width_ = chosen->capture_width;
+  capture_height_ = chosen->capture_height;
+  preview_width_ = chosen->preview_width;
+  preview_height_ = chosen->preview_height;
+
+  if (config.capture_width > 0 &&
+      (capture_width_ != config.capture_width ||
+       capture_height_ != config.capture_height)) {
+    __android_log_print(ANDROID_LOG_WARN, kTag,
+                        "camera %s does not offer %dx%d; using %dx%d",
+                        camera_id_.c_str(), config.capture_width,
+                        config.capture_height, capture_width_, capture_height_);
+  }
+
+  // A logical camera can swap physical lenses on its own, and the intrinsics go
+  // with them. Nothing here stops that; it is flagged so a capture that comes
+  // back inconsistent has somewhere to start.
+  if (info_.logical_multi_camera) {
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "camera %s is logical: the lens may change by itself",
+                        camera_id_.c_str());
   }
 
   __android_log_print(ANDROID_LOG_INFO, kTag,
-                      "camera %s: capture %dx%d, preview %dx%d, orientation %d",
-                      camera_id_.c_str(), capture_width_, capture_height_,
-                      preview_width_, preview_height_, sensor_orientation_);
+                      "using camera %s: %.1fmm, capture %dx%d, preview %dx%d, "
+                      "orientation %d",
+                      camera_id_.c_str(), info_.focal_length_mm, capture_width_,
+                      capture_height_, preview_width_, preview_height_,
+                      sensor_orientation_);
   return true;
 }
 
@@ -264,13 +360,13 @@ bool CameraSource::StartSession() {
          ACAMERA_OK;
 }
 
-bool CameraSource::Start(int32_t requested_width, int32_t requested_height) {
+bool CameraSource::Start(const CaptureConfig& config) {
   if (session_ != nullptr) return true;
 
   manager_ = ACameraManager_create();
   if (manager_ == nullptr) return false;
 
-  if (!SelectCamera(requested_width, requested_height) || !OpenReaders() || !OpenDevice() || !StartSession()) {
+  if (!SelectCamera(config) || !OpenReaders() || !OpenDevice() || !StartSession()) {
     Stop();
     return false;
   }

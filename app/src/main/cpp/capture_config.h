@@ -23,15 +23,32 @@ enum class Retention {
 //
 //   capture   = max | 1920x1080
 //   retention = sharpest | all
+//   lens      = main | ultrawide | <camera id>
 //
 // Anything missing keeps its default. An unreadable file is not an error: the
 // defaults are a working configuration, and a capture that refused to start
 // because of a typo in a settings file would be worse than one that ignored it.
+// Which of the rear lenses to open.
+enum class Lens {
+  // The camera the system offers first. On a phone this is a logical camera
+  // that picks a physical lens by zoom ratio, which means it can change lens
+  // mid-session and change the intrinsics with it.
+  kMain,
+  // The shortest focal length the device exposes. A physical camera, so the
+  // lens cannot change underneath a capture, and one frame covers far more of
+  // a room — at the cost of distortion and of detail.
+  kUltrawide,
+  // A camera id spelled out. Whatever it is, it is used as given.
+  kExplicit,
+};
+
 struct CaptureConfig {
   // 0 means the largest size the camera offers.
   int32_t capture_width = 0;
   int32_t capture_height = 0;
   Retention retention = Retention::kSharpest;
+  Lens lens = Lens::kMain;
+  std::string lens_id;  // only when lens is kExplicit
 
   // Loads from `<directory>/capture.conf`. Returns false if there was no file,
   // which leaves every field at its default.

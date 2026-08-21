@@ -9,6 +9,7 @@
 #include <string>
 
 #include "camera_image.h"
+#include "capture_config.h"
 
 namespace sensor_logger {
 
@@ -39,7 +40,7 @@ class CameraSource {
   // A requested size is taken only if the camera offers it exactly; anything
   // else falls back to the largest, since a silently different resolution is
   // worse than an ignored setting.
-  bool Start(int32_t requested_width = 0, int32_t requested_height = 0);
+  bool Start(const CaptureConfig& config);
   void Stop();
 
   bool is_running() const { return session_ != nullptr; }
@@ -53,6 +54,8 @@ class CameraSource {
   // screen wants the newest frame, and the recorder wants every frame.
   bool AcquirePreviewFrame(CameraImageView* out);
 
+  const CameraInfo& info() const { return info_; }
+
   int32_t capture_width() const { return capture_width_; }
   int32_t capture_height() const { return capture_height_; }
   int32_t preview_width() const { return preview_width_; }
@@ -62,13 +65,18 @@ class CameraSource {
   int32_t sensor_orientation() const { return sensor_orientation_; }
 
  private:
-  bool SelectCamera(int32_t requested_width, int32_t requested_height);
+  bool SelectCamera(const CaptureConfig& config);
+  bool ReadCamera(const char* id, ACameraMetadata* characteristics,
+                  const CaptureConfig& config, CameraInfo* out,
+                  int32_t* capture_width, int32_t* capture_height,
+                  int32_t* preview_width, int32_t* preview_height) const;
   bool OpenReaders();
   bool OpenDevice();
   bool StartSession();
   static bool ReadImage(AImage* image, CameraImageView* out);
 
   std::string camera_id_;
+  CameraInfo info_;
   int32_t sensor_orientation_ = 0;
 
   int32_t capture_width_ = 0;

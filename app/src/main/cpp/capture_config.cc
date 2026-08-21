@@ -57,6 +57,17 @@ bool CaptureConfig::Load(const std::string& directory) {
                               value.c_str());
         }
       }
+    } else if (key == "lens") {
+      if (value == "main") {
+        lens = Lens::kMain;
+        lens_id.clear();
+      } else if (value == "ultrawide") {
+        lens = Lens::kUltrawide;
+        lens_id.clear();
+      } else if (!value.empty()) {
+        lens = Lens::kExplicit;
+        lens_id = value;
+      }
     } else if (key == "retention") {
       if (value == "all") {
         retention = Retention::kAll;
@@ -76,14 +87,21 @@ bool CaptureConfig::Load(const std::string& directory) {
 }
 
 std::string CaptureConfig::Describe() const {
-  char buffer[64];
+  const char* lens_name = "main";
+  if (lens == Lens::kUltrawide) {
+    lens_name = "ultrawide";
+  } else if (lens == Lens::kExplicit) {
+    lens_name = lens_id.c_str();
+  }
+
+  char buffer[96];
   if (capture_width > 0) {
-    std::snprintf(buffer, sizeof(buffer), "%dx%d %s", capture_width,
+    std::snprintf(buffer, sizeof(buffer), "%dx%d %s lens %s", capture_width,
                   capture_height,
-                  retention == Retention::kAll ? "all" : "sharpest");
+                  retention == Retention::kAll ? "all" : "sharpest", lens_name);
   } else {
-    std::snprintf(buffer, sizeof(buffer), "max %s",
-                  retention == Retention::kAll ? "all" : "sharpest");
+    std::snprintf(buffer, sizeof(buffer), "max %s lens %s",
+                  retention == Retention::kAll ? "all" : "sharpest", lens_name);
   }
   return buffer;
 }

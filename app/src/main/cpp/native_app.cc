@@ -181,8 +181,7 @@ void StartCapture(AppState* state) {
   if (state->capturing) return;
   if (!state->permission_granted) return;
 
-  if (!state->camera.Start(state->config.capture_width,
-                           state->config.capture_height)) {
+  if (!state->camera.Start(state->config)) {
     LogError("could not start the camera");
     return;
   }
@@ -227,8 +226,9 @@ std::vector<std::string> StatusLines(const AppState& state) {
   }
   lines.emplace_back(buffer);
 
-  std::snprintf(buffer, sizeof(buffer), "CAPTURE %dX%d  KEEP %s",
+  std::snprintf(buffer, sizeof(buffer), "%dX%d  %.1FMM  KEEP %s",
                 state.camera.capture_width(), state.camera.capture_height(),
+                state.camera.info().focal_length_mm,
                 state.config.retention == Retention::kAll ? "ALL" : "SHARPEST");
   lines.emplace_back(buffer);
 
@@ -347,7 +347,7 @@ extern "C" void android_main(android_app* app) {
       // native buffer, so waiting for a tap would mean capturing nothing.
       if (!state.recorder.is_recording()) {
         if (state.recorder.Start(SessionRoot(app), frame.timestamp_ns,
-                                 state.camera.sensor_orientation(),
+                                 state.camera.info(),
                                  state.config.retention)) {
           __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
                               state.recorder.session_path().c_str());

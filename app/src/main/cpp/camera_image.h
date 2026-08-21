@@ -2,8 +2,27 @@
 #define SENSOR_LOGGER_CAMERA_IMAGE_H
 
 #include <cstdint>
+#include <string>
 
 namespace sensor_logger {
+
+// What produced a session's frames.
+//
+// Recorded because reconstruction needs it and because a phone has several
+// lenses that are not interchangeable: an ultra-wide and a periscope disagree
+// about focal length by a factor of eight, and frames from the two cannot be
+// solved as one camera.
+struct CameraInfo {
+  std::string id;
+  int32_t width = 0;
+  int32_t height = 0;
+  int32_t sensor_orientation = 0;
+  float focal_length_mm = 0.0f;
+  float aperture = 0.0f;
+  float sensor_width_mm = 0.0f;
+  float sensor_height_mm = 0.0f;
+  bool logical_multi_camera = false;
+};
 
 // How the chroma planes are arranged in memory.
 //

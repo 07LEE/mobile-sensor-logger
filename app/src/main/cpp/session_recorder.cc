@@ -56,8 +56,7 @@ SessionRecorder::~SessionRecorder() { Stop(); }
 
 bool SessionRecorder::Start(const std::string& root,
                             int64_t start_timestamp_ns,
-                            int32_t sensor_orientation,
-                            Retention retention) {
+                            const CameraInfo& camera, Retention retention) {
   if (recording_) return false;
   if (!MakeDirectory(root)) return false;
 
@@ -87,7 +86,7 @@ bool SessionRecorder::Start(const std::string& root,
   writer_.Start([this](PendingFrame& frame) { WriteFrame(frame); });
 
   start_timestamp_ns_ = start_timestamp_ns;
-  sensor_orientation_ = sensor_orientation;
+  camera_ = camera;
   retention_ = retention;
   last_timestamp_ns_ = start_timestamp_ns;
   written_frames_ = 0;
@@ -246,7 +245,15 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
            << "  \"retention\": \""
            << (retention_ == Retention::kAll ? "all" : "sharpest") << "\",\n"
-           << "  \"sensor_orientation\": " << sensor_orientation_ << ",\n"
+           << "  \"camera_id\": \"" << camera_.id << "\",\n"
+           << "  \"focal_length_mm\": " << camera_.focal_length_mm << ",\n"
+           << "  \"aperture\": " << camera_.aperture << ",\n"
+           << "  \"sensor_size_mm\": [" << camera_.sensor_width_mm << ", "
+           << camera_.sensor_height_mm << "],\n"
+           << "  \"logical_multi_camera\": "
+           << (camera_.logical_multi_camera ? "true" : "false") << ",\n"
+           << "  \"sensor_orientation\": " << camera_.sensor_orientation
+           << ",\n"
            << "  \"sensor_orientation_note\": \"degrees clockwise the frames "
               "must be rotated to appear upright; they are written as the "
               "sensor reads them\",\n"

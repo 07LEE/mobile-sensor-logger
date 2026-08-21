@@ -24,7 +24,7 @@ One directory per session under `<external files>/sessions/`:
 | `frames.csv` | `timestamp_ns, filename, width, height, sharpness, chroma_layout, luma_row_stride, chroma_row_stride, chroma_pixel_stride, segment0_length, segment1_length, segment2_length` |
 | `imu.csv` | `timestamp_ns, sensor, x, y, z` — `sensor` is `accel` or `gyro` |
 | `candidates.csv` | `timestamp_ns, sharpness, shift, residual` — one row per frame scored, kept or not |
-| `session.json` | Counts and units |
+| `session.json` | Counts, units, and which camera the session came from |
 
 Timestamps are nanoseconds, taken from the image rather than read on arrival, and
 they are the key joining every file. `candidates.csv` joins to `frames.csv` on
@@ -53,6 +53,11 @@ frame has a 4096-byte row stride, so 16 bytes of every row are padding.
 Frames are written as the sensor reads them, which is not upright.
 `sensor_orientation` in `session.json` is how many degrees clockwise to rotate
 them — 90 on a Galaxy S25 Ultra.
+
+`session.json` also carries `camera_id`, `focal_length_mm`, `aperture` and
+`sensor_size_mm`. Frames from different lenses cannot be solved as one camera —
+an ultra-wide and a periscope disagree about focal length by a factor of
+eight — so this is what says which one a session is.
 
 ### Inertial data
 
@@ -89,6 +94,35 @@ against a reconstruction.
 `candidates.csv` holds a row for every frame scored, including those discarded —
 about fifty bytes each. What a different threshold would have selected can be
 worked out from a capture already taken.
+
+## Settings
+
+Read once at startup from `capture.conf` in the app's external files directory,
+which is where `adb push` reaches. Missing file or missing key means the
+default.
+
+```
+capture   = max | 1920x1080     # largest the camera offers, or an exact size
+retention = sharpest | all      # selected frames, or every frame
+lens      = main | ultrawide | <camera id>
+```
+
+```bash
+adb push capture.conf /sdcard/Android/data/com.sensor.logger/files/
+```
+
+Every rear camera is logged at startup with its focal length, so `lens` can name
+one by id. On a Galaxy S25 Ultra two are offered: `0` at 6.3mm and `2` at 2.2mm.
+
+`main` is whichever the system lists first. That is usually a **logical**
+camera, which chooses a physical lens by zoom ratio and can change it during a
+capture — and the focal length changes with it, which nothing downstream will
+expect. `session.json` records `logical_multi_camera` so a session that came
+back inconsistent has somewhere to start. `ultrawide` picks the shortest focal
+length, which on the tested device is a physical camera and cannot change.
+
+A requested size is used only if the chosen camera offers it exactly; otherwise
+it takes the largest and says so in the log.
 
 ## Running out of room
 
@@ -146,7 +180,8 @@ One device, and the numbers in this file come from it:
 | | |
 | --- | --- |
 | Galaxy S25 Ultra | SM-S938N, Android 16 (API 36) |
-| Capture size | 4080x3060, 18.8MB per frame |
+| Rear cameras offered | `0` at 6.3mm f/1.7 (logical), `2` at 2.2mm f/1.9 |
+| Capture size | 4080x3060 on both, 18.8MB per frame |
 | Chroma layout | `semi_planar_vu`, luma row stride 4096 |
 | Timestamp source | `REALTIME` |
 | Inertial rate | ~637 samples/s combined |
