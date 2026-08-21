@@ -343,7 +343,13 @@ bool PreviewRenderer::UploadCamera(const CameraImageView& image) {
   return true;
 }
 
-void PreviewRenderer::DrawCamera(int32_t sensor_orientation) {
+bool PreviewRenderer::CameraRectContains(float x, float y) const {
+  return x >= camera_left_ && x <= camera_right_ && y >= camera_top_ &&
+         y <= camera_bottom_;
+}
+
+void PreviewRenderer::DrawCamera(int32_t sensor_orientation,
+                                 float height_fraction) {
   if (!camera_uploaded_ || viewport_width_ <= 0 || viewport_height_ <= 0) return;
 
   glDisable(GL_DEPTH_TEST);
@@ -374,13 +380,34 @@ void PreviewRenderer::DrawCamera(int32_t sensor_orientation) {
   const float screen_aspect = static_cast<float>(viewport_width_) /
                               static_cast<float>(viewport_height_);
 
+  // The area the picture is fitted into: the whole screen at 1, or a band
+  // across the top of it below that.
+  if (height_fraction > 1.0f) height_fraction = 1.0f;
+  if (height_fraction < 0.05f) height_fraction = 0.05f;
+
+  const float area_aspect = screen_aspect / height_fraction;
+
   float half_width = 1.0f;
   float half_height = 1.0f;
-  if (image_aspect > screen_aspect) {
-    half_height = screen_aspect / image_aspect;
+  if (image_aspect > area_aspect) {
+    half_height = area_aspect / image_aspect;
   } else {
-    half_width = image_aspect / screen_aspect;
+    half_width = image_aspect / area_aspect;
   }
+
+  // Letterboxed inside the band, and the band pinned to the top of the screen.
+  const float band_top = 1.0f;
+  const float band_bottom = 1.0f - 2.0f * height_fraction;
+  const float centre = (band_top + band_bottom) * 0.5f;
+  const float span = (band_top - band_bottom) * 0.5f;
+
+  const float top = centre + span * half_height;
+  const float bottom = centre - span * half_height;
+
+  camera_left_ = (1.0f - half_width) * 0.5f * viewport_width_;
+  camera_right_ = (1.0f + half_width) * 0.5f * viewport_width_;
+  camera_top_ = (1.0f - top) * 0.5f * viewport_height_;
+  camera_bottom_ = (1.0f - bottom) * 0.5f * viewport_height_;
 
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, luma_texture_);
@@ -393,8 +420,7 @@ void PreviewRenderer::DrawCamera(int32_t sensor_orientation) {
   glUniform1i(glGetUniformLocation(camera_program_, "u_swap_chroma"),
               swap_chroma_ ? 1 : 0);
 
-  DrawQuad(camera_program_, -half_width, -half_height, half_width, half_height,
-           uvs);
+  DrawQuad(camera_program_, -half_width, bottom, half_width, top, uvs);
 }
 
 void PreviewRenderer::RasterizeText(const std::vector<std::string>& lines) {
@@ -431,22 +457,37 @@ void PreviewRenderer::RasterizeText(const std::vector<std::string>& lines) {
 }
 
 void PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
-                                 bool recording) {
+                                 bool recording, float top_fraction,
+                                 int columns) {
   if (viewport_width_ <= 0 || viewport_height_ <= 0) return;
+  if (columns < 1) columns = 1;
+  if (columns > kTextColumns) columns = kTextColumns;
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-  // Each glyph cell is scaled so the grid spans the width of the screen, which
-  // keeps the readout legible on any display without a size to tune.
-  const float scale =
-      static_cast<float>(viewport_width_) / static_cast<float>(kTextWidth);
-  const float panel_height_px = static_cast<float>(kTextHeight) * scale;
-  const float panel_bottom =
-      1.0f - 2.0f * panel_height_px / static_cast<float>(viewport_height_);
+  // Fewer columns across the same width means larger glyphs. Only that many are
+  // sampled out of the grid, so lines are written to fit rather than scaled to.
+  //
+  // Inset from the edges: text that starts in the very first column of a phone
+  // screen reads as though it has been cut off, and the curved corners of one
+  // will eat it.
+  constexpr float kInset = 0.04f;
+  const float text_width_px =
+      static_cast<float>(viewport_width_) * (1.0f - kInset);
 
-  static constexpr float kFullUvs[8] = {0.0f, 1.0f, 1.0f, 1.0f,
-                                        0.0f, 0.0f, 1.0f, 0.0f};
+  const float used = static_cast<float>(columns) / kTextColumns;
+  const float scale = text_width_px / static_cast<float>(columns * kCellWidth);
+  const float panel_height_px = static_cast<float>(kTextHeight) * scale;
+
+  const float panel_top = 1.0f - 2.0f * top_fraction;
+  const float panel_bottom =
+      panel_top - 2.0f * panel_height_px / static_cast<float>(viewport_height_);
+
+  const float left = -1.0f + kInset;
+  const float right = 1.0f - kInset;
+
+  const float kFullUvs[8] = {0.0f, 1.0f, used, 1.0f, 0.0f, 0.0f, used, 0.0f};
 
   glActiveTexture(GL_TEXTURE0);
   glUseProgram(quad_program_);
@@ -456,24 +497,29 @@ void PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
   // unreadable, which is exactly the scene a capture is usually pointed at.
   glBindTexture(GL_TEXTURE_2D, white_texture_);
   glUniform4f(quad_color_location_, 0.0f, 0.0f, 0.0f, 0.55f);
-  DrawQuad(quad_program_, -1.0f, panel_bottom, 1.0f, 1.0f, kFullUvs);
+  DrawQuad(quad_program_, -1.0f, panel_bottom, 1.0f, panel_top, kFullUvs);
 
   RasterizeText(lines);
   glUniform4f(quad_color_location_, 1.0f, 1.0f, 1.0f, 1.0f);
-  DrawQuad(quad_program_, -1.0f, panel_bottom, 1.0f, 1.0f, kFullUvs);
+  DrawQuad(quad_program_, left, panel_bottom, right, panel_top, kFullUvs);
 
   // A marker that reads at arm's length without focusing on the text.
-  const float marker = 2.0f * 24.0f * scale / static_cast<float>(viewport_width_);
-  const float marker_y =
-      2.0f * 24.0f * scale / static_cast<float>(viewport_height_);
+  // On the first line, at its right edge, so it reads as part of the state
+  // rather than as something floating on its own.
+  const float line_px = static_cast<float>(kCellHeight) * scale;
+  const float marker_w = 2.0f * line_px * 0.7f / static_cast<float>(viewport_width_);
+  const float marker_h = 2.0f * line_px * 0.7f / static_cast<float>(viewport_height_);
+  const float line_bottom =
+      panel_top - 2.0f * line_px / static_cast<float>(viewport_height_);
+
   glBindTexture(GL_TEXTURE_2D, white_texture_);
   if (recording) {
     glUniform4f(quad_color_location_, 0.9f, 0.1f, 0.1f, 1.0f);
   } else {
-    glUniform4f(quad_color_location_, 0.4f, 0.4f, 0.4f, 1.0f);
+    glUniform4f(quad_color_location_, 0.3f, 0.3f, 0.3f, 1.0f);
   }
-  DrawQuad(quad_program_, 1.0f - marker - 0.02f, panel_bottom - marker_y - 0.02f,
-           1.0f - 0.02f, panel_bottom - 0.02f, kFullUvs);
+  DrawQuad(quad_program_, right - marker_w, line_bottom, right,
+           line_bottom + marker_h, kFullUvs);
 
   glDisable(GL_BLEND);
 }

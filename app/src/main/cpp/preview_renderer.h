@@ -46,12 +46,19 @@ class PreviewRenderer {
   bool UploadCamera(const CameraImageView& image);
 
   // Draws the last uploaded frame, rotated upright by `sensor_orientation`
-  // degrees and letterboxed to keep its shape.
-  void DrawCamera(int32_t sensor_orientation);
+  // degrees and letterboxed inside the top `height_fraction` of the screen.
+  // Pass 1 to fill it.
+  void DrawCamera(int32_t sensor_orientation, float height_fraction);
 
-  // Draws `lines` at the top of the screen over a dark panel, plus a filled
+  // Where the picture ended up on screen, in pixels from the top left, as of
+  // the last DrawCamera. What a touch means depends on what is under it.
+  bool CameraRectContains(float x, float y) const;
+
+  // Draws `lines` starting at `top_fraction` down the screen, sized so that
+  // `columns` glyphs span its width — fewer columns, larger text. Plus a filled
   // marker that is red while recording and grey otherwise.
-  void DrawStatus(const std::vector<std::string>& lines, bool recording);
+  void DrawStatus(const std::vector<std::string>& lines, bool recording,
+                  float top_fraction, int columns);
 
  private:
   void DrawQuad(GLuint program, float x0, float y0, float x1, float y1,
@@ -72,6 +79,12 @@ class PreviewRenderer {
   int32_t camera_height_ = 0;
   bool camera_uploaded_ = false;
   bool swap_chroma_ = false;
+
+  // Pixels from the top left, set by the last DrawCamera.
+  float camera_left_ = 0.0f;
+  float camera_top_ = 0.0f;
+  float camera_right_ = 0.0f;
+  float camera_bottom_ = 0.0f;
   std::vector<uint8_t> chroma_pixels_;
 
   int viewport_width_ = 0;

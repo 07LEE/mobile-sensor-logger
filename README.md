@@ -194,21 +194,36 @@ anyway. Sessions are never deleted; clearing them is a manual job.
 
 ## On screen
 
-The camera image with a readout over it:
+The picture is small and the numbers get the room:
 
 ```
-REC 0:57   153 KEPT / 1696 SEEN
-4080X3060  6.3MM  KEEP SHARPEST
-SHIFT 2%  DIFF 4%   IMU 36651
-SESSION 2.9GB   FREE 111.0GB
-ROOM FOR 36 MIN AT THIS RATE
-DROPPED 0  NO IMAGE 0
+     +--------------------------+
+     |                          |
+     |     the camera, small    |  <- tap to swap
+     |                          |
+     | REC 0:57    36 MIN LEFT  |
+     | 153 KEPT / 1696 SEEN     |
+     | 2.9GB USED  111.0GB FREE |
+     | SHIFT 2/12  DIFF 4/6     |
+     | 4080X3060 2.2MM SHARP    |
+     | DROP 0 NOIMG 0 IMU 36K   |
+     |                          |
+     |          black           |
+     +--------------------------+
 ```
+
+A tap **on the picture** swaps the two: the camera fills the screen and the
+numbers shrink to a strip over it. Nothing that could lose a capture sits behind
+a touch, so a palm across the screen costs nothing.
+
+Leaving most of the panel black is not only a layout choice — on OLED those
+pixels are switched off, and the screen is the second largest draw on the
+battery after the camera itself.
 
 `SHIFT` and `DIFF` are the two selection thresholds, as percentages. A red marker
 in the corner means recording.
 
-`ROOM FOR` is the free space divided by the rate this capture is actually
+`MIN LEFT` is the free space divided by the rate this capture is actually
 filling it. That rate depends on the resolution, on how much of the scene is
 moving, and on how many frames survive selection, so a figure worked out
 beforehand would be wrong for the capture in hand.

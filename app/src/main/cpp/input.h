@@ -12,6 +12,17 @@ enum class Action {
   kNextLens,
 };
 
+// One pass over the input queue.
+struct InputEvents {
+  Action action = Action::kNone;
+
+  // Where the screen was last touched, in pixels from the top left. Whether
+  // that means anything is for the caller to decide against what it drew.
+  bool touched = false;
+  float x = 0.0f;
+  float y = 0.0f;
+};
+
 // Turns key and touch events into actions.
 //
 // The volume keys rather than the screen. GameActivity's default key filter
@@ -21,16 +32,17 @@ enum class Action {
 // case, and pressing one does not move the camera the way reaching for a
 // particular part of the screen does.
 //
-// Touches are drained but bound to nothing: a palm across the screen while the
-// phone is pointed at something is not a decision, and a capture that stops
-// because of one is a trip wasted.
+// Touches come back with their position rather than as an action. What a touch
+// means depends on what is under it, and only the caller knows that. Nothing
+// that ends a capture is ever put behind one: a palm across the screen while
+// the phone is pointed at something is not a decision.
 class Input {
  public:
   // Installs the filters. Call once, before the loop.
   void Attach(android_app* app);
 
   // Drains whatever has arrived since the last call.
-  Action Poll(android_app* app);
+  InputEvents Poll(android_app* app);
 };
 
 }  // namespace sensor_logger

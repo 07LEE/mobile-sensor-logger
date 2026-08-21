@@ -73,6 +73,11 @@ struct AppState {
   // one starts, since the reason is worth more at the moment of finding out
   // than in a log read afterwards.
   const char* stop_reason = nullptr;
+
+  // The picture is small by default and the numbers are what the screen is
+  // mostly for; a tap on the picture trades that round. Small also leaves most
+  // of an OLED panel switched off, which is where the power goes.
+  bool preview_expanded = false;
   bool permission_granted = false;
 };
 
@@ -321,64 +326,70 @@ std::vector<std::string> StatusLines(const AppState& state) {
   char buffer[64];
   std::vector<std::string> lines;
 
+  // Written to fit the narrower of the two layouts, so one set serves both: the
+  // compact one spreads them across the screen and the expanded one shrinks
+  // them out of the way of the picture.
   const int64_t elapsed_s = recorder.elapsed_ns() / 1000000000;
+
+  // How long the free space lasts at the rate this capture is actually filling
+  // it. The rate follows the resolution, how much of the scene is moving and
+  // how many frames survive selection, so a figure worked out beforehand would
+  // be wrong for the capture in hand.
+  long long minutes = -1;
+  if (elapsed_s > 2 && recorder.written_bytes() > 0) {
+    const double per_second =
+        static_cast<double>(recorder.written_bytes()) / elapsed_s;
+    minutes = static_cast<long long>(state.free_bytes / per_second / 60.0);
+  }
+
   if (recorder.is_recording()) {
-    std::snprintf(buffer, sizeof(buffer), "REC %lld:%02lld  %lld KEPT / %lld SEEN",
-                  (long long)(elapsed_s / 60), (long long)(elapsed_s % 60),
-                  (long long)recorder.written_frames(),
-                  (long long)recorder.considered_frames());
+    if (minutes >= 0) {
+      std::snprintf(buffer, sizeof(buffer), "REC %lld:%02lld   %lld MIN LEFT",
+                    (long long)(elapsed_s / 60), (long long)(elapsed_s % 60),
+                    minutes);
+    } else {
+      std::snprintf(buffer, sizeof(buffer), "REC %lld:%02lld",
+                    (long long)(elapsed_s / 60), (long long)(elapsed_s % 60));
+    }
   } else if (state.stop_reason != nullptr) {
     std::snprintf(buffer, sizeof(buffer), "%s", state.stop_reason);
   } else {
-    std::snprintf(buffer, sizeof(buffer), "IDLE - VOL DOWN TO RECORD");
+    std::snprintf(buffer, sizeof(buffer), "IDLE - VOL DOWN");
   }
   lines.emplace_back(buffer);
 
-  std::snprintf(buffer, sizeof(buffer), "%dX%d  %.1FMM  KEEP %s",
-                state.camera.capture_width(), state.camera.capture_height(),
-                state.camera.info().focal_length_mm,
-                state.config.retention == Retention::kAll ? "ALL" : "SHARPEST");
+  std::snprintf(buffer, sizeof(buffer), "%lld KEPT / %lld SEEN",
+                (long long)recorder.written_frames(),
+                (long long)recorder.considered_frames());
   lines.emplace_back(buffer);
 
-  // Movement since the last kept frame. Nothing else on the device says whether
-  // the capture is covering new ground, now that there is no pose to ask.
-  // Each number against the threshold that would end the stretch, so the
-  // readout says how close the next frame is rather than just where things
-  // stand.
-  std::snprintf(buffer, sizeof(buffer), "SHIFT %.0F/%.0F  DIFF %.0F/%.0F  IMU %lld",
-                recorder.last_shift() * 100.0f,
-                state.config.min_shift * 100.0f,
-                recorder.last_residual() * 100.0f,
-                state.config.min_residual * 100.0f,
-                (long long)recorder.imu_samples());
-  lines.emplace_back(buffer);
-
-  std::snprintf(buffer, sizeof(buffer), "SESSION %s   FREE %s",
+  std::snprintf(buffer, sizeof(buffer), "%s USED  %s FREE",
                 Bytes(recorder.written_bytes()).c_str(),
                 Bytes(state.free_bytes).c_str());
   lines.emplace_back(buffer);
 
-  // How long the free space lasts at the rate this capture is actually filling
-  // it. The rate depends on resolution, on how much of the scene is moving and
-  // on which frames survive selection, so a figure worked out beforehand would
-  // be wrong; this one is measured.
-  if (elapsed_s > 2 && recorder.written_bytes() > 0) {
-    const double per_second =
-        static_cast<double>(recorder.written_bytes()) / elapsed_s;
-    const long long minutes =
-        static_cast<long long>(state.free_bytes / per_second / 60.0);
-    std::snprintf(buffer, sizeof(buffer), "ROOM FOR %lld MIN AT THIS RATE",
-                  minutes);
-  } else {
-    std::snprintf(buffer, sizeof(buffer), "MEASURING THE RATE");
-  }
+  // Each number against the threshold that would end the stretch, so the
+  // readout says how close the next frame is rather than just where things
+  // stand.
+  std::snprintf(buffer, sizeof(buffer), "SHIFT %.0F/%.0F  DIFF %.0F/%.0F",
+                recorder.last_shift() * 100.0f,
+                state.config.min_shift * 100.0f,
+                recorder.last_residual() * 100.0f,
+                state.config.min_residual * 100.0f);
   lines.emplace_back(buffer);
 
-  // Anything but zero here means the capture is outrunning the disk, which
-  // nothing else on screen would show.
-  std::snprintf(buffer, sizeof(buffer), "DROPPED %lld  NO IMAGE %lld",
+  std::snprintf(buffer, sizeof(buffer), "%dX%d %.1FMM %s",
+                state.camera.capture_width(), state.camera.capture_height(),
+                state.camera.info().focal_length_mm,
+                state.config.retention == Retention::kAll ? "ALL" : "SHARP");
+  lines.emplace_back(buffer);
+
+  // Anything but zero in the first two means the capture is outrunning the
+  // disk, which nothing else on screen would show.
+  std::snprintf(buffer, sizeof(buffer), "DROP %lld NOIMG %lld IMU %lldK",
                 (long long)recorder.dropped_frames(),
-                (long long)recorder.frames_without_image());
+                (long long)recorder.frames_without_image(),
+                (long long)(recorder.imu_samples() / 1000));
   lines.emplace_back(buffer);
 
   return lines;
@@ -478,7 +489,8 @@ extern "C" void android_main(android_app* app) {
       if (state.recorder.is_recording()) state.recorder.Record(frame);
     }
 
-    switch (state.input.Poll(app)) {
+    const sensor_logger::InputEvents input = state.input.Poll(app);
+    switch (input.action) {
       case Action::kToggleRecording:
         ToggleRecording(&state);
         break;
@@ -487,6 +499,12 @@ extern "C" void android_main(android_app* app) {
         break;
       case Action::kNone:
         break;
+    }
+
+    // Only a touch on the picture itself, and it only changes how things are
+    // drawn. Nothing that could lose a capture sits behind a touch.
+    if (input.touched && state.preview.CameraRectContains(input.x, input.y)) {
+      state.preview_expanded = !state.preview_expanded;
     }
 
     // Every couple of seconds at camera rate.
@@ -516,9 +534,15 @@ extern "C" void android_main(android_app* app) {
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    state.preview.DrawCamera(state.camera.sensor_orientation());
-    state.preview.DrawStatus(StatusLines(state),
-                             state.recorder.is_recording());
+    // Expanded: the picture fills the screen and the numbers shrink to a strip
+    // over it. Compact: a band at the top, and the numbers get the room.
+    const float picture = state.preview_expanded ? 1.0f : 0.42f;
+    const float text_top = state.preview_expanded ? 0.0f : 0.44f;
+    const int text_columns = state.preview_expanded ? 40 : 26;
+
+    state.preview.DrawCamera(state.camera.sensor_orientation(), picture);
+    state.preview.DrawStatus(StatusLines(state), state.recorder.is_recording(),
+                             text_top, text_columns);
 
     eglSwapBuffers(state.display, state.surface);
 
