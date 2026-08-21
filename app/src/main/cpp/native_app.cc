@@ -14,6 +14,7 @@
 #include "camera_source.h"
 #include "capture_config.h"
 #include "imu_source.h"
+#include "input.h"
 #include "preview_renderer.h"
 #include "session_recorder.h"
 
@@ -25,7 +26,9 @@ using sensor_logger::CaptureConfig;
 using sensor_logger::Retention;
 using sensor_logger::FrameData;
 using sensor_logger::ImuSample;
+using sensor_logger::Action;
 using sensor_logger::ImuSource;
+using sensor_logger::Input;
 using sensor_logger::PendingFrame;
 using sensor_logger::PreviewRenderer;
 using sensor_logger::SessionRecorder;
@@ -55,6 +58,7 @@ struct AppState {
   ImuSource imu;
   PreviewRenderer preview;
   SessionRecorder recorder;
+  Input input;
   CaptureConfig config;
   bool capturing = false;
 
@@ -63,6 +67,7 @@ struct AppState {
   // number moves slowly enough that a couple of seconds stale is honest.
   int64_t free_bytes = 0;
   int free_space_countdown = 0;
+  int64_t last_timestamp_ns = 0;
   bool permission_granted = false;
 };
 
@@ -235,6 +240,50 @@ std::string Bytes(int64_t bytes) {
   return buffer;
 }
 
+void ToggleRecording(AppState* state) {
+  if (state->recorder.is_recording()) {
+    state->recorder.Stop();
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "stopped: %lld written, %lld considered, %lld dropped",
+                        (long long)state->recorder.written_frames(),
+                        (long long)state->recorder.considered_frames(),
+                        (long long)state->recorder.dropped_frames());
+    return;
+  }
+
+  if (state->last_timestamp_ns == 0) {
+    LogError("no frame yet; not starting");
+    return;
+  }
+
+  if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
+                            state->camera.info(), state->config)) {
+    __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
+                        state->recorder.session_path().c_str());
+  } else {
+    LogError("could not start recording");
+  }
+}
+
+// Cycles through the rear cameras. Changing lens means restarting the camera,
+// so a session in progress is closed first rather than continued across a
+// change of intrinsics that nothing downstream would expect.
+void NextLens(AppState* state) {
+  if (state->recorder.is_recording()) state->recorder.Stop();
+
+  const std::string current = state->camera.info().id;
+  state->camera.Stop();
+
+  state->config.lens = sensor_logger::Lens::kExplicit;
+  state->config.lens_id = state->camera.NextRearCameraId(current);
+
+  if (!state->camera.Start(state->config)) {
+    LogError("could not switch lens");
+    return;
+  }
+  state->last_timestamp_ns = 0;
+}
+
 // The readout drawn over the preview.
 //
 // These are the numbers that decide whether a capture is worth keeping, and
@@ -252,7 +301,7 @@ std::vector<std::string> StatusLines(const AppState& state) {
                   (long long)recorder.written_frames(),
                   (long long)recorder.considered_frames());
   } else {
-    std::snprintf(buffer, sizeof(buffer), "IDLE - WAITING FOR THE CAMERA");
+    std::snprintf(buffer, sizeof(buffer), "IDLE - VOL DOWN TO RECORD");
   }
   lines.emplace_back(buffer);
 
@@ -345,6 +394,7 @@ extern "C" void android_main(android_app* app) {
   app->onAppCmd = HandleCommand;
 
   state.config.Load(FilesRoot(app));
+  state.input.Attach(app);
 
   state.permission_granted = HasCameraPermission(app);
   if (!state.permission_granted) {
@@ -395,25 +445,27 @@ extern "C" void android_main(android_app* app) {
     if (!state.capturing) continue;
 
     if (state.camera.AcquireFrame(&frame)) {
-      // Recording starts on its own with the first frame. There is no UI to
-      // start it from, and GameActivity is not delivering touch events to the
-      // native buffer, so waiting for a tap would mean capturing nothing.
-      if (!state.recorder.is_recording()) {
-        if (state.recorder.Start(SessionRoot(app), frame.timestamp_ns,
-                                 state.camera.info(), state.config)) {
-          __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
-                              state.recorder.session_path().c_str());
-        } else {
-          LogError("could not start recording");
-        }
-      }
+      state.last_timestamp_ns = frame.timestamp_ns;
+      if (state.recorder.is_recording()) state.recorder.Record(frame);
+    }
 
-      state.recorder.Record(frame);
+    switch (state.input.Poll(app)) {
+      case Action::kToggleRecording:
+        ToggleRecording(&state);
+        break;
+      case Action::kNextLens:
+        NextLens(&state);
+        break;
+      case Action::kNone:
+        break;
     }
 
     // Every couple of seconds at camera rate.
     if (--state.free_space_countdown <= 0) {
-      state.free_bytes = FreeBytes(SessionRoot(app));
+      // The files directory rather than the sessions directory: the latter is
+      // not created until the first session starts, and statvfs on a path that
+      // does not exist reports no space at all.
+      state.free_bytes = FreeBytes(FilesRoot(app));
       state.free_space_countdown = 60;
     }
 

@@ -211,9 +211,14 @@ Needs the Android SDK, NDK, and CMake; versions are pinned in
 `app/build.gradle.kts` and the Gradle wrapper. Built with JDK 21. There is no
 emulator path — the capture path is a real camera.
 
-Recording starts by itself with the first frame. Press **Home** to end a session
-cleanly; that is what writes `session.json`. Back does not work, and neither does
-tapping the screen.
+**Volume down** starts and stops recording. **Volume up** switches to the next
+rear lens, which ends any session in progress — the intrinsics change with the
+lens and nothing downstream expects that inside one session. Press **Home** to
+leave; that also closes the session cleanly.
+
+Touches are read but bound to nothing on purpose. A palm across the screen while
+the phone is pointed at something is not a decision, and a capture that stops
+because of one is a trip wasted.
 
 Pulling and clearing a device:
 
@@ -242,8 +247,6 @@ Those are properties of that device, not of Android.
 
 ## Not implemented
 
-- **Touch input.** `GameActivity` does not deliver motion events to the native
-  buffer, so there is nothing to tap. Recording auto-starts instead.
 - **Manual focus and exposure.** The capture request is the preview template, so
   both still follow the scene.
 - **Storage management.** No cap, no warning, no cleanup.

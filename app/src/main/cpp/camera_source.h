@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "camera_image.h"
 #include "capture_config.h"
@@ -56,6 +57,10 @@ class CameraSource {
 
   const CameraInfo& info() const { return info_; }
 
+  // The rear camera after `id` in the order the system lists them, wrapping
+  // round. Survives Stop(), so switching lens does not have to enumerate again.
+  std::string NextRearCameraId(const std::string& id) const;
+
   int32_t capture_width() const { return capture_width_; }
   int32_t capture_height() const { return capture_height_; }
   int32_t preview_width() const { return preview_width_; }
@@ -76,6 +81,7 @@ class CameraSource {
   static bool ReadImage(AImage* image, CameraImageView* out);
 
   std::string camera_id_;
+  std::vector<std::string> rear_ids_;
   CameraInfo info_;
   int32_t sensor_orientation_ = 0;
 

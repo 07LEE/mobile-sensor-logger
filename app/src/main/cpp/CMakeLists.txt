@@ -25,6 +25,7 @@ add_library(sensor_logger SHARED
     sharpness.cc
     frame_writer.cc
     imu_source.cc
+    input.cc
     session_recorder.cc
 )
 

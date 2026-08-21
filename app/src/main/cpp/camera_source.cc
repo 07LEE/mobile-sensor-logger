@@ -224,6 +224,7 @@ bool CameraSource::SelectCamera(const CaptureConfig& config) {
     int32_t capture_width, capture_height, preview_width, preview_height;
   };
   std::vector<Candidate> back;
+  rear_ids_.clear();
 
   for (int i = 0; i < ids->numCameras; ++i) {
     ACameraMetadata* characteristics = nullptr;
@@ -255,6 +256,7 @@ bool CameraSource::SelectCamera(const CaptureConfig& config) {
             candidate.info.aperture, candidate.capture_width,
             candidate.capture_height,
             candidate.info.logical_multi_camera ? ", logical" : "");
+        rear_ids_.push_back(candidate.info.id);
         back.push_back(std::move(candidate));
       }
     }
@@ -430,6 +432,15 @@ bool CameraSource::StartSession() {
   return ACameraCaptureSession_setRepeatingRequest(session_, nullptr, 1,
                                                    &request_, nullptr) ==
          ACAMERA_OK;
+}
+
+std::string CameraSource::NextRearCameraId(const std::string& id) const {
+  if (rear_ids_.empty()) return id;
+
+  for (size_t i = 0; i < rear_ids_.size(); ++i) {
+    if (rear_ids_[i] == id) return rear_ids_[(i + 1) % rear_ids_.size()];
+  }
+  return rear_ids_.front();
 }
 
 bool CameraSource::Start(const CaptureConfig& config) {
