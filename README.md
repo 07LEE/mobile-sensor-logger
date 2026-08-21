@@ -331,18 +331,29 @@ The second command needs `run-as`; a plain `rm` is refused under scoped storage.
 
 ## Tested on
 
-One device, and the numbers in this file come from it:
+Two devices. The numbers quoted elsewhere in this file come from the first.
 
-| | |
-| --- | --- |
-| Galaxy S25 Ultra | SM-S938N, Android 16 (API 36) |
-| Rear cameras offered | `0` at 6.3mm f/1.7 (logical), `2` at 2.2mm f/1.9 |
-| Capture size | 4080x3060 on both, 18.8MB per frame |
-| Chroma layout | `semi_planar_vu`, luma row stride 4096 |
-| Timestamp source | `REALTIME` |
-| Inertial rate | ~637 samples/s combined |
+| | Galaxy S25 Ultra | Galaxy Z Flip4 |
+| --- | --- | --- |
+| | SM-S938N, Android 16 | SM-F721N, Android 16 |
+| Capture size | 4080x3060, 18.8MB | 4000x3000, 18.1MB |
+| Luma row stride | 4096 | 4032 |
+| Ultrawide | 2.2mm f/1.9 | 1.7mm f/2.2 |
+| Main | 6.3mm f/1.7 (logical) | 5.0mm f/1.8 (logical) |
+| Intrinsics fx, fy | 1648, 1650 | 1579, 1578 |
+| Distortion k1 | +0.0159 | -0.0073 |
+| Hyperfocal | 0.91m | 0.59m |
+| Rolling shutter skew | 8.6ms | 32.0ms |
+| Chroma layout | `semi_planar_vu` | `semi_planar_vu` |
+| Timestamp source | `REALTIME` | `REALTIME` |
 
-Those are properties of that device, not of Android.
+Every one of those is read from the device rather than assumed, which is what
+the second one was needed to establish. The rolling shutter skew is the pair
+worth looking at: nearly four times longer on the Flip4 and about as long as the
+gap between frames, so the same movement skews its frames far more.
+
+Both are Samsung and both report semi-planar chroma, so the planar path has
+never run.
 
 ## Not implemented
 
