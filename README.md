@@ -117,9 +117,22 @@ frame kept:
 
 Either one crossing its threshold ends the stretch. `shift` catches panning and
 sideways movement; `residual` catches walking forward and rotating about the lens
-axis, which barely move the offset. Thresholds are in `frame_motion.h`, the
-sharpness subsampling step in `session_recorder.cc`. Neither has been tuned
-against a reconstruction.
+axis, which barely move the offset.
+
+Both are settings (see below); the sharpness subsampling step is in
+`session_recorder.cc`. Neither has been tuned against a reconstruction.
+
+Halving the thresholds roughly doubles the frames kept, and they only bite while
+the camera moves slowly enough for them to — sweep fast enough and every frame
+crosses them, at which point the capture is keeping everything and the frame rate
+is the only limit left.
+
+The defaults leave about 88% of the picture shared between consecutive kept
+frames, which is generous next to the 70 to 80% reconstruction usually asks for.
+They sit there because at full resolution the free space is the budget: 105GB
+holds roughly 5,500 frames, which these values spend in forty minutes and half
+these values spend in six. The `ROOM FOR` line on screen is what says whether a
+capture is spending it faster than intended.
 
 `candidates.csv` holds a row for every frame scored, including those discarded —
 about fifty bytes each. What a different threshold would have selected can be
