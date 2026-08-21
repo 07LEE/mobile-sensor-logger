@@ -169,6 +169,18 @@ with the AR session and is drained inside that poll loop. The counts in
 `session.json` — `imu_samples` against `written_frames` — are what will confirm
 it.
 
+The screen shows the camera image with a readout over it: whether recording is
+running, frames kept against frames seen, tracking state and why it is lost when
+it is, feature point count, inertial samples, and dropped frames. Those numbers
+decide whether a capture is worth keeping, and they used to exist only in
+logcat, which cannot be read while walking around with the phone — which is the
+only time they could change what someone does.
+
+Drawing the preview costs almost no GPU time: the camera runs at full rate for
+ARCore regardless, ARCore renders into the texture whether or not anything
+samples it, and the frame was already being presented. On an OLED panel it is
+not free in power terms, though, since a black screen leaves its pixels off.
+
 Recording currently starts by itself once ARCore is tracking, because
 `GameActivity` is not delivering touch events to the native input buffer and
 there is no UI to start it from.
@@ -178,9 +190,6 @@ If nothing is captured, check logcat: ARCore reports why it is not tracking, and
 
 ## Not implemented
 
-- **Camera preview.** ARCore renders into an external OES texture that nothing
-  draws, so the screen stays black. There is no way to see what is being
-  captured, or whether recording is running, except through logcat.
 - **Touch input.** `GameActivity` is not delivering motion events to the native
   buffer, so the tap-to-toggle path never fires. Recording auto-starts instead.
 - **Storage management.** Sessions are written until the device runs out of

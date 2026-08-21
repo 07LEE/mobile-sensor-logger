@@ -83,6 +83,15 @@ struct FrameData {
   std::vector<FeaturePoint> point_cloud;
   CameraImageView image;
   bool is_tracking = false;
+
+  // Where to sample the camera texture for each corner of the screen quad, in
+  // triangle-strip order. ARCore derives these from the display rotation and
+  // the aspect difference between sensor and screen, so drawing the texture
+  // without them stretches and rotates the preview.
+  std::array<float, 8> background_uvs{};
+
+  // Why the camera is not tracking, as text, or nullptr while it is.
+  const char* tracking_failure = nullptr;
 };
 
 // Owns the ARCore session and turns each update into a FrameData.
@@ -120,6 +129,7 @@ class ArSession {
 
   bool ReadPose(ArCamera* camera, CameraPose* out) const;
   bool ReadIntrinsics(ArCamera* camera, CameraIntrinsics* out) const;
+  void UpdateBackgroundUvs(FrameData* out);
   void ReadPointCloud(std::vector<FeaturePoint>* out) const;
   void ReadCameraImage(CameraImageView* out);
 
@@ -129,6 +139,9 @@ class ArSession {
   // Held across the caller's use of FrameData::image and released on the next
   // Update, because the plane pointers stay valid only while it lives.
   ArImageHandle image_;
+
+  std::array<float, 8> background_uvs_{};
+  bool background_uvs_valid_ = false;
 };
 
 }  // namespace sensor_logger

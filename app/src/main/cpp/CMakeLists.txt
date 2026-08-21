@@ -20,6 +20,7 @@ add_library(sensor_logger SHARED
     ar_session.cc
     keyframe_selector.cc
     pending_frame.cc
+    preview_renderer.cc
     sharpness.cc
     frame_writer.cc
     imu_source.cc

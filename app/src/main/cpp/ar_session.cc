@@ -162,6 +162,28 @@ void ArSession::SetDisplayGeometry(int rotation, int width, int height) {
   }
 }
 
+void ArSession::UpdateBackgroundUvs(FrameData* out) {
+  // Recomputed only when ARCore says the geometry moved. The mapping depends on
+  // display rotation and on the sensor being a different shape from the screen,
+  // neither of which changes per frame.
+  int32_t changed = 0;
+  ArFrame_getDisplayGeometryChanged(session_, frame_.get(), &changed);
+
+  if (changed != 0 || !background_uvs_valid_) {
+    // Corners of the screen in normalised device coordinates, in the order the
+    // triangle strip draws them.
+    static constexpr float kNdcQuad[8] = {-1.0f, -1.0f, 1.0f,  -1.0f,
+                                          -1.0f, 1.0f,  1.0f, 1.0f};
+    ArFrame_transformCoordinates2d(
+        session_, frame_.get(),
+        AR_COORDINATES_2D_OPENGL_NORMALIZED_DEVICE_COORDINATES, 4, kNdcQuad,
+        AR_COORDINATES_2D_TEXTURE_NORMALIZED, background_uvs_.data());
+    background_uvs_valid_ = true;
+  }
+
+  out->background_uvs = background_uvs_;
+}
+
 bool ArSession::Update(FrameData* out) {
   if (session_ == nullptr || !frame_) return false;
 
@@ -171,6 +193,7 @@ bool ArSession::Update(FrameData* out) {
   }
 
   ArFrame_getTimestamp(session_, frame_.get(), &out->timestamp_ns);
+  UpdateBackgroundUvs(out);
 
   // Not an owning handle: the camera belongs to the frame and is invalidated by
   // the next update, so it must not be released here.
@@ -185,11 +208,15 @@ bool ArSession::Update(FrameData* out) {
     ArTrackingFailureReason reason = AR_TRACKING_FAILURE_REASON_NONE;
     ArCamera_getTrackingFailureReason(session_, camera, &reason);
 
+    out->tracking_failure = TrackingFailureName(reason);
+
     static int64_t reported = 0;
     if (++reported % 90 == 0) {
       __android_log_print(ANDROID_LOG_INFO, kTag, "not tracking: %s",
-                          TrackingFailureName(reason));
+                          out->tracking_failure);
     }
+  } else {
+    out->tracking_failure = nullptr;
   }
 
   if (out->is_tracking) {

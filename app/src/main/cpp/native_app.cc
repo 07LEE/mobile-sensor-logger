@@ -4,6 +4,7 @@
 #include <game-activity/GameActivity.h>
 #include <game-activity/native_app_glue/android_native_app_glue.h>
 
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "ar_session.h"
 #include "camera_timestamp_probe.h"
 #include "imu_source.h"
+#include "preview_renderer.h"
 #include "session_recorder.h"
 
 namespace {
@@ -19,6 +21,8 @@ using sensor_logger::ArSession;
 using sensor_logger::FrameData;
 using sensor_logger::ImuSample;
 using sensor_logger::ImuSource;
+using sensor_logger::PendingFrame;
+using sensor_logger::PreviewRenderer;
 using sensor_logger::SessionRecorder;
 
 constexpr char kTag[] = "sensor_logger";
@@ -46,6 +50,7 @@ struct AppState {
 
   ArSession ar_session;
   ImuSource imu;
+  PreviewRenderer preview;
   SessionRecorder recorder;
   bool ar_started = false;
   bool permission_granted = false;
@@ -145,12 +150,21 @@ bool InitDisplay(AppState* state) {
   glTexParameteri(kTextureExternalOes, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(kTextureExternalOes, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
+  if (!state->preview.Init()) {
+    LogError("could not build the preview shaders");
+    return false;
+  }
+  state->preview.SetViewport(state->width, state->height);
+
   return true;
 }
 
 void TerminateDisplay(AppState* state) {
   state->ar_session.Pause();
   state->ar_started = false;
+
+  // Before the context goes away, since the objects belong to it.
+  state->preview.Destroy();
 
   if (state->display != EGL_NO_DISPLAY) {
     eglMakeCurrent(state->display, EGL_NO_SURFACE, EGL_NO_SURFACE,
@@ -262,6 +276,52 @@ void HandleCommand(android_app* app, int32_t cmd) {
   }
 }
 
+// The readout drawn over the preview.
+//
+// These are the numbers that decide whether a capture is worth keeping, and
+// until now they existed only in logcat — which is not readable while walking
+// around with the phone, which is the only time they could change anything.
+std::vector<std::string> StatusLines(const AppState& state,
+                                     const FrameData& frame) {
+  const SessionRecorder& recorder = state.recorder;
+  char buffer[64];
+  std::vector<std::string> lines;
+
+  if (recorder.is_recording()) {
+    std::snprintf(buffer, sizeof(buffer), "RECORDING  %lld KEPT / %lld SEEN",
+                  (long long)recorder.written_frames(),
+                  (long long)recorder.considered_frames());
+  } else {
+    std::snprintf(buffer, sizeof(buffer), "IDLE - WAITING FOR TRACKING");
+  }
+  lines.emplace_back(buffer);
+
+  if (frame.is_tracking) {
+    lines.emplace_back("TRACKING");
+  } else {
+    std::snprintf(buffer, sizeof(buffer), "NO TRACKING: %s",
+                  frame.tracking_failure != nullptr ? frame.tracking_failure
+                                                    : "STARTING UP");
+    lines.emplace_back(buffer);
+  }
+
+  std::snprintf(buffer, sizeof(buffer), "POINTS %d", (int)frame.point_cloud.size());
+  lines.emplace_back(buffer);
+
+  std::snprintf(buffer, sizeof(buffer), "IMU %lld SAMPLES",
+                (long long)recorder.imu_samples());
+  lines.emplace_back(buffer);
+
+  // Anything but zero here means the capture is outrunning the disk, which
+  // nothing else on screen would show.
+  std::snprintf(buffer, sizeof(buffer), "DROPPED %lld  NO IMAGE %lld",
+                (long long)recorder.dropped_frames(),
+                (long long)recorder.frames_without_image());
+  lines.emplace_back(buffer);
+
+  return lines;
+}
+
 // Any tap toggles recording. A real UI comes later; this keeps the capture
 // path exercisable without one.
 bool ConsumeTap(android_app* app) {
@@ -369,6 +429,10 @@ extern "C" void android_main(android_app* app) {
     }
 
     if (ConsumeTap(app)) ToggleRecording(&state, frame);
+
+    state.preview.DrawCamera(state.camera_texture, frame.background_uvs.data());
+    state.preview.DrawStatus(StatusLines(state, frame),
+                             state.recorder.is_recording());
 
     eglSwapBuffers(state.display, state.surface);
   }
