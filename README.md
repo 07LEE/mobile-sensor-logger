@@ -184,8 +184,13 @@ rate and what is left at it.
 
 `dropped_frames` in `session.json` counts frames the writer could not keep up
 with. **It should be zero.** A run of drops means the capture is asking for more
-than the device can write. Nothing caps or cleans up sessions; they are written
-until the device is full.
+than the device can write.
+
+Recording stops on its own with 2GB left, and the readout says
+`STOPPED - DISK FULL`. That margin exists because a session that runs the disk
+to the last byte cannot write its own manifest — the settings, the counts and
+the calibration go with it — so a capture that filled a phone ends up unusable
+anyway. Sessions are never deleted; clearing them is a manual job.
 
 ## On screen
 
@@ -256,4 +261,4 @@ Those are properties of that device, not of Android.
 
 - **Manual focus and exposure.** The capture request is the preview template, so
   both still follow the scene.
-- **Storage management.** No cap, no warning, no cleanup.
+- **Cleaning up.** Old sessions are never removed; that is done over adb.

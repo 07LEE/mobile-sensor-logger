@@ -68,6 +68,11 @@ struct AppState {
   int64_t free_bytes = 0;
   int free_space_countdown = 0;
   int64_t last_timestamp_ns = 0;
+
+  // Why the last session ended, when it was not asked to. Shown until the next
+  // one starts, since the reason is worth more at the moment of finding out
+  // than in a log read afterwards.
+  const char* stop_reason = nullptr;
   bool permission_granted = false;
 };
 
@@ -240,6 +245,15 @@ std::string Bytes(int64_t bytes) {
   return buffer;
 }
 
+// Below this, recording stops on its own.
+//
+// Not zero, and not small. A session that runs the disk to the last byte cannot
+// write its own manifest — the settings, the counts, the calibration all go
+// with it — so a capture that filled a phone ends up unusable anyway. This is
+// enough room for a hundred frames at full resolution, which is plenty for
+// everything that has to be written after the last one.
+constexpr int64_t kMinimumFreeBytes = 2LL * 1000 * 1000 * 1000;
+
 void ToggleRecording(AppState* state) {
   if (state->recorder.is_recording()) {
     state->recorder.Stop();
@@ -256,8 +270,15 @@ void ToggleRecording(AppState* state) {
     return;
   }
 
+  if (state->free_bytes > 0 && state->free_bytes < kMinimumFreeBytes) {
+    state->stop_reason = "NOT ENOUGH SPACE TO START";
+    LogError("not enough free space to start recording");
+    return;
+  }
+
   if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
                             state->camera.info(), state->config)) {
+    state->stop_reason = nullptr;
     __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
                         state->recorder.session_path().c_str());
   } else {
@@ -300,6 +321,8 @@ std::vector<std::string> StatusLines(const AppState& state) {
                   (long long)(elapsed_s / 60), (long long)(elapsed_s % 60),
                   (long long)recorder.written_frames(),
                   (long long)recorder.considered_frames());
+  } else if (state.stop_reason != nullptr) {
+    std::snprintf(buffer, sizeof(buffer), "%s", state.stop_reason);
   } else {
     std::snprintf(buffer, sizeof(buffer), "IDLE - VOL DOWN TO RECORD");
   }
@@ -467,6 +490,16 @@ extern "C" void android_main(android_app* app) {
       // does not exist reports no space at all.
       state.free_bytes = FreeBytes(FilesRoot(app));
       state.free_space_countdown = 60;
+
+      if (state.recorder.is_recording() &&
+          state.free_bytes < kMinimumFreeBytes) {
+        state.recorder.Stop();
+        state.stop_reason = "STOPPED - DISK FULL";
+        __android_log_print(ANDROID_LOG_WARN, kTag,
+                            "stopped: %lld bytes free, %lld written",
+                            (long long)state.free_bytes,
+                            (long long)state.recorder.written_frames());
+      }
     }
 
     if (state.display == EGL_NO_DISPLAY) continue;
