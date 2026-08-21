@@ -71,7 +71,7 @@ class PreviewRenderer {
   int32_t camera_width_ = 0;
   int32_t camera_height_ = 0;
   bool camera_uploaded_ = false;
-  float luma_edge_ = 1.0f;
+  bool swap_chroma_ = false;
   std::vector<uint8_t> chroma_pixels_;
 
   int viewport_width_ = 0;

@@ -18,6 +18,7 @@ set(CMAKE_SHARED_LINKER_FLAGS
 add_library(sensor_logger SHARED
     native_app.cc
     camera_source.cc
+    capture_config.cc
     frame_motion.cc
     pending_frame.cc
     preview_renderer.cc

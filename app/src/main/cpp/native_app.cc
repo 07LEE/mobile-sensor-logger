@@ -10,6 +10,7 @@
 
 #include "camera_image.h"
 #include "camera_source.h"
+#include "capture_config.h"
 #include "imu_source.h"
 #include "preview_renderer.h"
 #include "session_recorder.h"
@@ -18,6 +19,8 @@ namespace {
 
 using sensor_logger::CameraImageView;
 using sensor_logger::CameraSource;
+using sensor_logger::CaptureConfig;
+using sensor_logger::Retention;
 using sensor_logger::FrameData;
 using sensor_logger::ImuSample;
 using sensor_logger::ImuSource;
@@ -50,6 +53,7 @@ struct AppState {
   ImuSource imu;
   PreviewRenderer preview;
   SessionRecorder recorder;
+  CaptureConfig config;
   bool capturing = false;
   bool permission_granted = false;
 };
@@ -94,11 +98,14 @@ void RequestCameraPermission(android_app* app) {
   env->DeleteLocalRef(activity_class);
 }
 
+std::string FilesRoot(android_app* app) {
+  return app->activity->externalDataPath != nullptr
+             ? app->activity->externalDataPath
+             : app->activity->internalDataPath;
+}
+
 std::string SessionRoot(android_app* app) {
-  const char* base = app->activity->externalDataPath != nullptr
-                         ? app->activity->externalDataPath
-                         : app->activity->internalDataPath;
-  return std::string(base) + "/sessions";
+  return FilesRoot(app) + "/sessions";
 }
 
 bool InitDisplay(AppState* state) {
@@ -174,7 +181,8 @@ void StartCapture(AppState* state) {
   if (state->capturing) return;
   if (!state->permission_granted) return;
 
-  if (!state->camera.Start()) {
+  if (!state->camera.Start(state->config.capture_width,
+                           state->config.capture_height)) {
     LogError("could not start the camera");
     return;
   }
@@ -219,8 +227,9 @@ std::vector<std::string> StatusLines(const AppState& state) {
   }
   lines.emplace_back(buffer);
 
-  std::snprintf(buffer, sizeof(buffer), "CAPTURE %dX%d",
-                state.camera.capture_width(), state.camera.capture_height());
+  std::snprintf(buffer, sizeof(buffer), "CAPTURE %dX%d  KEEP %s",
+                state.camera.capture_width(), state.camera.capture_height(),
+                state.config.retention == Retention::kAll ? "ALL" : "SHARPEST");
   lines.emplace_back(buffer);
 
   // Movement since the last kept frame. Nothing else on the device says whether
@@ -282,6 +291,8 @@ extern "C" void android_main(android_app* app) {
   app->userData = &state;
   app->onAppCmd = HandleCommand;
 
+  state.config.Load(FilesRoot(app));
+
   state.permission_granted = HasCameraPermission(app);
   if (!state.permission_granted) {
     RequestCameraPermission(app);
@@ -336,7 +347,8 @@ extern "C" void android_main(android_app* app) {
       // native buffer, so waiting for a tap would mean capturing nothing.
       if (!state.recorder.is_recording()) {
         if (state.recorder.Start(SessionRoot(app), frame.timestamp_ns,
-                                 state.camera.sensor_orientation())) {
+                                 state.camera.sensor_orientation(),
+                                 state.config.retention)) {
           __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
                               state.recorder.session_path().c_str());
         } else {

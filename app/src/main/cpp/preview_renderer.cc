@@ -98,11 +98,13 @@ constexpr char kCameraFragmentShader[] = R"(#version 300 es
 precision mediump float;
 uniform sampler2D u_luma;
 uniform sampler2D u_chroma;
+uniform int u_swap_chroma;
 in vec2 v_uv;
 out vec4 o_color;
 void main() {
   float y = texture(u_luma, v_uv).r;
-  vec2 uv = texture(u_chroma, v_uv).rg - vec2(0.5, 0.5);
+  vec2 c = texture(u_chroma, v_uv).rg;
+  vec2 uv = (u_swap_chroma == 1 ? c.gr : c.rg) - vec2(0.5, 0.5);
   y = (y - 0.0625) * 1.164384;
   o_color = vec4(y + 1.596027 * uv.y,
                  y - 0.391762 * uv.x - 0.812968 * uv.y,
@@ -268,47 +270,75 @@ bool PreviewRenderer::UploadCamera(const CameraImageView& image) {
   if (!image.valid || image.planes[0].data == nullptr) return false;
 
   const ImagePlane& luma = image.planes[0];
-  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-  // The row stride is the width of the upload, and the extra columns are
-  // trimmed by the texture coordinates rather than by copying every row into a
-  // packed buffer first.
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, luma_texture_);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, luma.row_stride, image.height, 0,
-               GL_RED, GL_UNSIGNED_BYTE, luma.data);
-
-  // Chroma is packed here rather than uploaded in place. The planes arrive
-  // planar on some devices and interleaved on others, in either order, and one
-  // packed buffer is cheaper than three shaders. At preview size this is a few
-  // hundred kilobytes.
-  const int32_t chroma_width = image.width / 2;
-  const int32_t chroma_height = image.height / 2;
-  chroma_pixels_.resize(static_cast<size_t>(chroma_width) * chroma_height * 2);
-
   const ImagePlane& u = image.planes[1];
   const ImagePlane& v = image.planes[2];
-  for (int32_t y = 0; y < chroma_height; ++y) {
-    const uint8_t* u_row = u.data + static_cast<size_t>(y) * u.row_stride;
-    const uint8_t* v_row = v.data + static_cast<size_t>(y) * v.row_stride;
-    uint8_t* out = &chroma_pixels_[static_cast<size_t>(y) * chroma_width * 2];
 
-    for (int32_t x = 0; x < chroma_width; ++x) {
-      out[x * 2] = u_row[static_cast<size_t>(x) * u.pixel_stride];
-      out[x * 2 + 1] = v_row[static_cast<size_t>(x) * v.pixel_stride];
+  const int32_t chroma_width = image.width / 2;
+  const int32_t chroma_height = image.height / 2;
+
+  // Row padding is handled by the unpack row length rather than by copying
+  // every row into a packed buffer, and the storage is allocated once rather
+  // than on every frame. This runs at camera rate, and the loop it runs in has
+  // thirty-three milliseconds for everything.
+  const bool resized = image.width != camera_width_ ||
+                       image.height != camera_height_;
+  camera_width_ = image.width;
+  camera_height_ = image.height;
+
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, luma_texture_);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, luma.row_stride);
+  if (resized) {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, image.width, image.height, 0, GL_RED,
+                 GL_UNSIGNED_BYTE, luma.data);
+  } else {
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, image.width, image.height, GL_RED,
+                    GL_UNSIGNED_BYTE, luma.data);
+  }
+
+  // Semi-planar chroma is already the two-channel layout the shader wants, one
+  // byte apart in one buffer, so it goes up untouched and the shader corrects
+  // the order. Planar chroma has no such luck and is interleaved here.
+  const uint8_t* chroma = nullptr;
+  int32_t chroma_row_length = chroma_width;
+
+  if (image.chroma_layout == ChromaLayout::kPlanar) {
+    chroma_pixels_.resize(static_cast<size_t>(chroma_width) * chroma_height * 2);
+    for (int32_t y = 0; y < chroma_height; ++y) {
+      const uint8_t* u_row = u.data + static_cast<size_t>(y) * u.row_stride;
+      const uint8_t* v_row = v.data + static_cast<size_t>(y) * v.row_stride;
+      uint8_t* out = &chroma_pixels_[static_cast<size_t>(y) * chroma_width * 2];
+
+      for (int32_t x = 0; x < chroma_width; ++x) {
+        out[x * 2] = u_row[static_cast<size_t>(x) * u.pixel_stride];
+        out[x * 2 + 1] = v_row[static_cast<size_t>(x) * v.pixel_stride];
+      }
     }
+    chroma = chroma_pixels_.data();
+    swap_chroma_ = false;
+  } else {
+    // Whichever plane is first is where the buffer starts; the shader swaps the
+    // channels when that is V.
+    swap_chroma_ = image.chroma_layout == ChromaLayout::kSemiPlanarVFirst;
+    chroma = swap_chroma_ ? v.data : u.data;
+    chroma_row_length = u.row_stride / 2;
   }
 
   glActiveTexture(GL_TEXTURE1);
   glBindTexture(GL_TEXTURE_2D, chroma_texture_);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, chroma_width, chroma_height, 0, GL_RG,
-               GL_UNSIGNED_BYTE, chroma_pixels_.data());
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, chroma_row_length);
+  if (resized) {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, chroma_width, chroma_height, 0,
+                 GL_RG, GL_UNSIGNED_BYTE, chroma);
+  } else {
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, chroma_width, chroma_height, GL_RG,
+                    GL_UNSIGNED_BYTE, chroma);
+  }
 
-  camera_width_ = image.width;
-  camera_height_ = image.height;
-  // Luma was uploaded stride-wide, so its right edge is padding.
-  luma_edge_ = static_cast<float>(image.width) /
-               static_cast<float>(luma.row_stride > 0 ? luma.row_stride : 1);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
   camera_uploaded_ = true;
   return true;
 }
@@ -322,7 +352,7 @@ void PreviewRenderer::DrawCamera(int32_t sensor_orientation) {
   // Corners of the image, in the strip order the quad is drawn in, rotated so
   // the sensor's idea of up matches the screen's. Phones mount the sensor on
   // its side, so this is 90 degrees far more often than it is zero.
-  const float e = luma_edge_;
+  constexpr float e = 1.0f;
   const float corners[4][8] = {
       {0, 1, e, 1, 0, 0, e, 0},  // 0
       {e, 1, e, 0, 0, 1, 0, 0},  // 90
@@ -360,6 +390,8 @@ void PreviewRenderer::DrawCamera(int32_t sensor_orientation) {
   glUseProgram(camera_program_);
   glUniform1i(glGetUniformLocation(camera_program_, "u_luma"), 0);
   glUniform1i(glGetUniformLocation(camera_program_, "u_chroma"), 1);
+  glUniform1i(glGetUniformLocation(camera_program_, "u_swap_chroma"),
+              swap_chroma_ ? 1 : 0);
 
   DrawQuad(camera_program_, -half_width, -half_height, half_width, half_height,
            uvs);

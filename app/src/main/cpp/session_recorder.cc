@@ -56,7 +56,8 @@ SessionRecorder::~SessionRecorder() { Stop(); }
 
 bool SessionRecorder::Start(const std::string& root,
                             int64_t start_timestamp_ns,
-                            int32_t sensor_orientation) {
+                            int32_t sensor_orientation,
+                            Retention retention) {
   if (recording_) return false;
   if (!MakeDirectory(root)) return false;
 
@@ -87,6 +88,7 @@ bool SessionRecorder::Start(const std::string& root,
 
   start_timestamp_ns_ = start_timestamp_ns;
   sensor_orientation_ = sensor_orientation;
+  retention_ = retention;
   last_timestamp_ns_ = start_timestamp_ns;
   written_frames_ = 0;
   considered_frames_ = 0;
@@ -118,6 +120,15 @@ void SessionRecorder::Record(const FrameData& frame) {
   // rather than as it was treated.
   const bool moved = motion_.Accept(frame.image);
   WriteCandidate(frame.timestamp_ns, sharpness);
+
+  // Keeping everything skips the comparison entirely: each frame goes straight
+  // out, and the sharpness and motion still land in candidates.csv so the
+  // selection rule can be judged against a take it did not get to make.
+  if (retention_ == Retention::kAll) {
+    pending_.Set(frame, sharpness);
+    FlushPending();
+    return;
+  }
 
   // Enough movement closes the current stretch: whatever the sharpest frame in
   // it turned out to be is written now, and this frame opens the next.
@@ -158,6 +169,10 @@ void SessionRecorder::FlushPending() {
   // by waiting is the one whose viewpoint the capture is currently at.
   writer_.Submit(std::move(pending_));
   pending_.Clear();
+
+  // Its buffer went with it; take a spent one so the next copy is not into
+  // freshly mapped pages.
+  pending_.AdoptBuffer(writer_.TakeBuffer());
 }
 
 void SessionRecorder::WriteFrame(PendingFrame& frame) {
@@ -229,6 +244,8 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << ",\n"
            << "  \"dropped_frames\": " << writer_.dropped() << ",\n"
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
+           << "  \"retention\": \""
+           << (retention_ == Retention::kAll ? "all" : "sharpest") << "\",\n"
            << "  \"sensor_orientation\": " << sensor_orientation_ << ",\n"
            << "  \"sensor_orientation_note\": \"degrees clockwise the frames "
               "must be rotated to appear upright; they are written as the "

@@ -45,6 +45,17 @@ class PendingFrame {
   // The segments, concatenated.
   const std::vector<uint8_t>& pixels() const { return pixels_; }
 
+  // Gives the buffer away once it has been written, and takes a spent one back
+  // for the next frame.
+  //
+  // A frame at capture resolution is around twenty megabytes. Allocating that
+  // fresh means the kernel hands over pages nobody has touched, and the copy
+  // then faults on every one of them — measured at over a hundred milliseconds
+  // on the tested device, which is three camera frames missed for each one
+  // kept. A buffer that has already been used carries its pages with it.
+  std::vector<uint8_t> ReleaseBuffer() { return std::move(pixels_); }
+  void AdoptBuffer(std::vector<uint8_t>&& buffer) { pixels_ = std::move(buffer); }
+
  private:
   bool valid_ = false;
   float sharpness_ = 0.0f;

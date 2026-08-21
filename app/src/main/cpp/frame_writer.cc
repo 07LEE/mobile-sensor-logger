@@ -44,6 +44,7 @@ void FrameWriter::Stop() {
 
   running_ = false;
   queue_.clear();
+  spare_buffers_.clear();
   sink_ = nullptr;
 }
 
@@ -64,7 +65,25 @@ void FrameWriter::Run() {
     }
 
     sink_(frame);
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      // Bounded by the same number as the queue: past that, buffers are being
+      // kept for a backlog that is not happening.
+      if (spare_buffers_.size() < max_queued_) {
+        spare_buffers_.push_back(frame.ReleaseBuffer());
+      }
+    }
   }
+}
+
+std::vector<uint8_t> FrameWriter::TakeBuffer() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (spare_buffers_.empty()) return {};
+
+  std::vector<uint8_t> buffer = std::move(spare_buffers_.front());
+  spare_buffers_.pop_front();
+  return buffer;
 }
 
 }  // namespace sensor_logger

@@ -35,7 +35,11 @@ class CameraSource {
 
   // Opens the rear camera and starts both streams. Returns false if no camera
   // is usable, which on Android usually means the permission is not held yet.
-  bool Start();
+  //
+  // A requested size is taken only if the camera offers it exactly; anything
+  // else falls back to the largest, since a silently different resolution is
+  // worse than an ignored setting.
+  bool Start(int32_t requested_width = 0, int32_t requested_height = 0);
   void Stop();
 
   bool is_running() const { return session_ != nullptr; }
@@ -58,7 +62,7 @@ class CameraSource {
   int32_t sensor_orientation() const { return sensor_orientation_; }
 
  private:
-  bool SelectCamera();
+  bool SelectCamera(int32_t requested_width, int32_t requested_height);
   bool OpenReaders();
   bool OpenDevice();
   bool StartSession();

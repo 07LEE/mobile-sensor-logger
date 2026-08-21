@@ -9,6 +9,7 @@
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include "pending_frame.h"
 
@@ -54,6 +55,10 @@ class FrameWriter {
   // Writes what is already queued, then stops the thread.
   void Stop();
 
+  // A buffer a written frame has finished with, or an empty one when none is
+  // spare. See PendingFrame::AdoptBuffer for why this is worth doing.
+  std::vector<uint8_t> TakeBuffer();
+
   bool is_running() const { return running_; }
   int64_t dropped() const { return dropped_; }
 
@@ -65,6 +70,7 @@ class FrameWriter {
   std::mutex mutex_;
   std::condition_variable not_empty_;
   std::deque<PendingFrame> queue_;
+  std::deque<std::vector<uint8_t>> spare_buffers_;
   size_t max_queued_ = kDefaultMaxQueued;
   bool stopping_ = false;
   std::atomic<bool> running_{false};

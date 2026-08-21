@@ -40,7 +40,8 @@ void OnSessionClosed(void*, ACameraCaptureSession*) {}
 
 CameraSource::~CameraSource() { Stop(); }
 
-bool CameraSource::SelectCamera() {
+bool CameraSource::SelectCamera(int32_t requested_width,
+                                int32_t requested_height) {
   ACameraIdList* ids = nullptr;
   if (ACameraManager_getCameraIdList(manager_, &ids) != ACAMERA_OK ||
       ids == nullptr) {
@@ -113,13 +114,29 @@ bool CameraSource::SelectCamera() {
         }
       }
 
-      // Capture: the largest there is, since that resolution caps the detail
-      // any later processing can recover.
+      // Capture: what was asked for if the camera has it, otherwise the
+      // largest, since that resolution caps the detail any later processing can
+      // recover.
       for (const auto& size : sizes) {
-        if (static_cast<int64_t>(size.first) * size.second >
-            static_cast<int64_t>(capture_width_) * capture_height_) {
+        if (size.first == requested_width && size.second == requested_height) {
           capture_width_ = size.first;
           capture_height_ = size.second;
+          break;
+        }
+      }
+
+      if (capture_width_ == 0) {
+        if (requested_width > 0) {
+          __android_log_print(ANDROID_LOG_WARN, kTag,
+                              "camera does not offer %dx%d; using the largest",
+                              requested_width, requested_height);
+        }
+        for (const auto& size : sizes) {
+          if (static_cast<int64_t>(size.first) * size.second >
+              static_cast<int64_t>(capture_width_) * capture_height_) {
+            capture_width_ = size.first;
+            capture_height_ = size.second;
+          }
         }
       }
 
@@ -247,13 +264,13 @@ bool CameraSource::StartSession() {
          ACAMERA_OK;
 }
 
-bool CameraSource::Start() {
+bool CameraSource::Start(int32_t requested_width, int32_t requested_height) {
   if (session_ != nullptr) return true;
 
   manager_ = ACameraManager_create();
   if (manager_ == nullptr) return false;
 
-  if (!SelectCamera() || !OpenReaders() || !OpenDevice() || !StartSession()) {
+  if (!SelectCamera(requested_width, requested_height) || !OpenReaders() || !OpenDevice() || !StartSession()) {
     Stop();
     return false;
   }
