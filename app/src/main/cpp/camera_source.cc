@@ -4,7 +4,10 @@
 #include <camera/NdkCameraMetadata.h>
 #include <media/NdkImage.h>
 
+#include <cmath>
 #include <cstddef>
+#include <utility>
+#include <vector>
 
 namespace sensor_logger {
 namespace {
@@ -83,9 +86,11 @@ bool CameraSource::SelectCamera() {
         sensor_orientation_ = orientation.data.i32[0];
       }
 
-      // Every YUV output size the device offers is logged, not just the one
+      // Every YUV output size the device offers is logged, not just the ones
       // chosen. When a capture comes back smaller than expected this is the
       // first thing worth reading.
+      std::vector<std::pair<int32_t, int32_t>> sizes;
+
       ACameraMetadata_const_entry configs{};
       if (ACameraMetadata_getConstEntry(
               characteristics, ACAMERA_SCALER_AVAILABLE_STREAM_CONFIGURATIONS,
@@ -104,21 +109,40 @@ bool CameraSource::SelectCamera() {
 
           __android_log_print(ANDROID_LOG_INFO, kTag, "camera %s: yuv %dx%d",
                               camera_id_.c_str(), width, height);
+          sizes.emplace_back(width, height);
+        }
+      }
 
-          if (static_cast<int64_t>(width) * height >
-              static_cast<int64_t>(capture_width_) * capture_height_) {
-            capture_width_ = width;
-            capture_height_ = height;
-          }
+      // Capture: the largest there is, since that resolution caps the detail
+      // any later processing can recover.
+      for (const auto& size : sizes) {
+        if (static_cast<int64_t>(size.first) * size.second >
+            static_cast<int64_t>(capture_width_) * capture_height_) {
+          capture_width_ = size.first;
+          capture_height_ = size.second;
+        }
+      }
 
-          const bool small_enough = width <= kMaxPreviewWidth;
-          const bool bigger_than_current =
-              static_cast<int64_t>(width) * height >
-              static_cast<int64_t>(preview_width_) * preview_height_;
-          if (small_enough && bigger_than_current) {
-            preview_width_ = width;
-            preview_height_ = height;
-          }
+      // Preview: the largest under the cap *with the same shape as the
+      // capture*. A device offers sizes in several aspect ratios, and the
+      // largest that fits is often not one of the capture's — which would put a
+      // different field of view on screen from the one being recorded, in the
+      // one place whose whole job is showing what is being recorded.
+      const float capture_aspect =
+          capture_height_ > 0
+              ? static_cast<float>(capture_width_) / capture_height_
+              : 0.0f;
+
+      for (const auto& size : sizes) {
+        if (size.first > kMaxPreviewWidth || size.second <= 0) continue;
+
+        const float aspect = static_cast<float>(size.first) / size.second;
+        if (std::fabs(aspect - capture_aspect) > 0.02f) continue;
+
+        if (static_cast<int64_t>(size.first) * size.second >
+            static_cast<int64_t>(preview_width_) * preview_height_) {
+          preview_width_ = size.first;
+          preview_height_ = size.second;
         }
       }
 
@@ -132,8 +156,9 @@ bool CameraSource::SelectCamera() {
 
   if (!found) return false;
 
-  // A device with nothing under the preview cap can still be previewed from the
-  // capture stream; it costs upload bandwidth but it is not a failure.
+  // A device with nothing matching under the cap can still be previewed from
+  // the capture stream; it costs upload bandwidth but it is not a failure, and
+  // the shape on screen is right by construction.
   if (preview_width_ == 0) {
     preview_width_ = capture_width_;
     preview_height_ = capture_height_;

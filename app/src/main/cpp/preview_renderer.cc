@@ -325,9 +325,9 @@ void PreviewRenderer::DrawCamera(int32_t sensor_orientation) {
   const float e = luma_edge_;
   const float corners[4][8] = {
       {0, 1, e, 1, 0, 0, e, 0},  // 0
-      {0, 0, 0, 1, e, 0, e, 1},  // 90
+      {e, 1, e, 0, 0, 1, 0, 0},  // 90
       {e, 0, 0, 0, e, 1, 0, 1},  // 180
-      {e, 1, e, 0, 0, 1, 0, 0},  // 270
+      {0, 0, 0, 1, e, 0, e, 1},  // 270
   };
   const int index = ((sensor_orientation % 360) + 360) % 360 / 90;
   const float* uvs = corners[index & 3];
