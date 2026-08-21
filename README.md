@@ -25,11 +25,13 @@ One directory per session under `<external files>/sessions/`:
 Timestamps are nanoseconds, taken from the image rather than read on arrival, so
 they refer to capture time, and they are the key joining every file.
 
-Every camera on the tested device reports `ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE`
-as `REALTIME`: image and inertial timestamps share a clock. That is the
-condition any offline visual-inertial reconstruction depends on, and the one
-thing no amount of software could work around, so a device reporting otherwise
-should be recognised rather than left to produce quietly unusable captures.
+Whether they share a clock with the inertial samples is not a given:
+`ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE` says, and when it is not `REALTIME`
+nothing in software can line the two streams up. It is logged at startup so a
+device that reports otherwise is recognised rather than left to produce quietly
+unusable captures. That condition is what any offline visual-inertial
+reconstruction depends on, and the one thing no amount of software could work
+around.
 
 ### Images
 
@@ -40,9 +42,10 @@ budget on work the workstation can do later.
 `frames.csv` carries what is needed to decode them, and `chroma_layout` is the
 part to read first. Android's `YUV_420_888` allows chroma to be planar — U and V
 in separate buffers — or semi-planar, where they interleave into one and the two
-"planes" are the same memory a byte apart. A Galaxy S25 Ultra reports
-`semi_planar_vu`, meaning V comes first. Treating that as two planes would both
-duplicate a megabyte per frame and swap the colours.
+"planes" are the same memory a byte apart. Treating the second case as two
+planes would both duplicate a megabyte per frame and swap the colours. Which one
+a device produces is a property of that device, so the file records it per frame
+rather than assuming.
 
 The file is the segments listed in `frames.csv`, concatenated: luma, then either
 one interleaved chroma segment or a U and a V segment. Row strides are not the
@@ -149,14 +152,31 @@ its pixels off. The GPU cost is negligible next to the camera and the writes.
 
 ## Building
 
-Requires the Android SDK, NDK, and CMake.
-
 ```bash
 ./gradlew assembleDebug
 ```
 
+Requires the Android SDK, NDK, and CMake. The versions are pinned in
+`app/build.gradle.kts` and the Gradle wrapper rather than repeated here, where
+they would drift. Built with JDK 21.
+
 No network access is needed beyond the usual dependency resolution, and no
 emulator path exists: the capture path is a real camera.
+
+## Tested on
+
+A single device, and the numbers quoted in this file come from it:
+
+| | |
+| --- | --- |
+| Galaxy S25 Ultra | SM-S938N, Android 16 (API 36) |
+| Chroma layout | `semi_planar_vu` — V first, interleaved |
+| Timestamp source | `REALTIME` on all four cameras |
+| Inertial rate | ~637 samples/s combined, at a requested 200Hz each |
+
+Everything above is a property of that device, not of Android. A second device
+would be the first real test of whether the format assumptions hold, and there
+has not been one.
 
 ## Status
 
