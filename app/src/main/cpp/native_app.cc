@@ -264,9 +264,14 @@ std::vector<std::string> StatusLines(const AppState& state) {
 
   // Movement since the last kept frame. Nothing else on the device says whether
   // the capture is covering new ground, now that there is no pose to ask.
-  std::snprintf(buffer, sizeof(buffer), "SHIFT %.0F%%  DIFF %.0F%%  IMU %lld",
+  // Each number against the threshold that would end the stretch, so the
+  // readout says how close the next frame is rather than just where things
+  // stand.
+  std::snprintf(buffer, sizeof(buffer), "SHIFT %.0F/%.0F  DIFF %.0F/%.0F  IMU %lld",
                 recorder.last_shift() * 100.0f,
+                state.config.min_shift * 100.0f,
                 recorder.last_residual() * 100.0f,
+                state.config.min_residual * 100.0f,
                 (long long)recorder.imu_samples());
   lines.emplace_back(buffer);
 
@@ -395,8 +400,7 @@ extern "C" void android_main(android_app* app) {
       // native buffer, so waiting for a tap would mean capturing nothing.
       if (!state.recorder.is_recording()) {
         if (state.recorder.Start(SessionRoot(app), frame.timestamp_ns,
-                                 state.camera.info(),
-                                 state.config.retention)) {
+                                 state.camera.info(), state.config)) {
           __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
                               state.recorder.session_path().c_str());
         } else {

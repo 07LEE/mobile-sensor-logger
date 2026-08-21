@@ -60,7 +60,7 @@ class SessionRecorder {
 
   // Creates the session directory under `root` and opens the log files.
   bool Start(const std::string& root, int64_t start_timestamp_ns,
-             const CameraInfo& camera, Retention retention);
+             const CameraInfo& camera, const CaptureConfig& config);
 
   // Offers a frame. Scored and buffered; written only if it ends up the
   // sharpest of its stretch.

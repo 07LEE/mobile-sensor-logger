@@ -56,7 +56,8 @@ SessionRecorder::~SessionRecorder() { Stop(); }
 
 bool SessionRecorder::Start(const std::string& root,
                             int64_t start_timestamp_ns,
-                            const CameraInfo& camera, Retention retention) {
+                            const CameraInfo& camera,
+                            const CaptureConfig& config) {
   if (recording_) return false;
   if (!MakeDirectory(root)) return false;
 
@@ -82,12 +83,13 @@ bool SessionRecorder::Start(const std::string& root,
   candidates_ << "timestamp_ns,sharpness,shift,residual\n";
 
   motion_.Reset();
+  motion_.SetThresholds(config.min_shift, config.min_residual);
   pending_.Clear();
   writer_.Start([this](PendingFrame& frame) { WriteFrame(frame); });
 
   start_timestamp_ns_ = start_timestamp_ns;
   camera_ = camera;
-  retention_ = retention;
+  retention_ = config.retention;
   last_timestamp_ns_ = start_timestamp_ns;
   written_frames_ = 0;
   written_bytes_ = 0;
@@ -248,6 +250,8 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
            << "  \"retention\": \""
            << (retention_ == Retention::kAll ? "all" : "sharpest") << "\",\n"
+           << "  \"min_shift\": " << motion_.min_shift() << ",\n"
+           << "  \"min_residual\": " << motion_.min_residual() << ",\n"
            << "  \"camera_id\": \"" << camera_.id << "\",\n"
            << "  \"focal_length_mm\": " << camera_.focal_length_mm << ",\n"
            << "  \"aperture\": " << camera_.aperture << ",\n"

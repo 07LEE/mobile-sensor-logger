@@ -32,11 +32,11 @@ namespace sensor_logger {
 class FrameMotion {
  public:
   // Fraction of the frame width the picture may slide before the stretch ends.
-  static constexpr float kDefaultMinShift = 0.12f;
+  static constexpr float kDefaultMinShift = 0.06f;
 
   // How much of the picture may fail to line up at the best offset, as a
   // fraction of full range, before the stretch ends regardless of the offset.
-  static constexpr float kDefaultMinResidual = 0.06f;
+  static constexpr float kDefaultMinResidual = 0.03f;
 
   FrameMotion() = default;
 
@@ -46,6 +46,14 @@ class FrameMotion {
   // True when the picture has changed enough to start a new stretch, which also
   // makes this frame the reference for the next one.
   bool Accept(const CameraImageView& image);
+
+  void SetThresholds(float min_shift, float min_residual) {
+    min_shift_ = min_shift;
+    min_residual_ = min_residual;
+  }
+
+  float min_shift() const { return min_shift_; }
+  float min_residual() const { return min_residual_; }
 
   void Reset();
 

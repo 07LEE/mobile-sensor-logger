@@ -2,6 +2,7 @@
 
 #include <android/log.h>
 
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 
@@ -68,6 +69,20 @@ bool CaptureConfig::Load(const std::string& directory) {
         lens = Lens::kExplicit;
         lens_id = value;
       }
+    } else if (key == "shift" || key == "residual") {
+      const double parsed = std::atof(value.c_str());
+      // A threshold of zero would end a stretch on every frame and one above a
+      // half can never be reached, so both are refused rather than silently
+      // turning selection off or on.
+      if (parsed > 0.0 && parsed < 0.5) {
+        (key == "shift" ? min_shift : min_residual) =
+            static_cast<float>(parsed);
+      } else {
+        __android_log_print(ANDROID_LOG_WARN, kTag,
+                            "capture.conf: %s must be between 0 and 0.5, got "
+                            "'%s'",
+                            key.c_str(), value.c_str());
+      }
     } else if (key == "retention") {
       if (value == "all") {
         retention = Retention::kAll;
@@ -94,15 +109,17 @@ std::string CaptureConfig::Describe() const {
     lens_name = lens_id.c_str();
   }
 
-  char buffer[96];
+  char size[24];
   if (capture_width > 0) {
-    std::snprintf(buffer, sizeof(buffer), "%dx%d %s lens %s", capture_width,
-                  capture_height,
-                  retention == Retention::kAll ? "all" : "sharpest", lens_name);
+    std::snprintf(size, sizeof(size), "%dx%d", capture_width, capture_height);
   } else {
-    std::snprintf(buffer, sizeof(buffer), "max %s lens %s",
-                  retention == Retention::kAll ? "all" : "sharpest", lens_name);
+    std::snprintf(size, sizeof(size), "max");
   }
+
+  char buffer[128];
+  std::snprintf(buffer, sizeof(buffer), "%s %s lens %s shift %.3f residual %.3f",
+                size, retention == Retention::kAll ? "all" : "sharpest",
+                lens_name, min_shift, min_residual);
   return buffer;
 }
 
