@@ -23,7 +23,7 @@ enum class Retention {
 //
 //   capture   = max | 1920x1080
 //   retention = sharpest | all
-//   lens      = main | ultrawide | <camera id>
+//   lens      = ultrawide | main | <camera id>
 //   shift     = 0.12        how far the picture may slide before a new frame
 //   residual  = 0.06        how much of it may stop matching
 //
@@ -34,11 +34,19 @@ enum class Retention {
 enum class Lens {
   // The camera the system offers first. On a phone this is a logical camera
   // that picks a physical lens by zoom ratio, which means it can change lens
-  // mid-session and change the intrinsics with it.
+  // mid-session and change the intrinsics with it. Best detail at arm's length
+  // and beyond.
   kMain,
-  // The shortest focal length the device exposes. A physical camera, so the
-  // lens cannot change underneath a capture, and one frame covers far more of
-  // a room — at the cost of distortion and of detail.
+  // The shortest focal length the device exposes, and the default.
+  //
+  // It wins at both ends of the range this is used at. A frame covers far more
+  // of a room, which matters when the free space is the budget, and it focuses
+  // closer than the main lens does — 5cm against 10cm on the tested device,
+  // which is enough to beat it on close detail despite the wider field, since
+  // detail goes as the reciprocal of distance.
+  //
+  // It is also a physical camera rather than a logical one, so the lens cannot
+  // change underneath a capture.
   kUltrawide,
   // A camera id spelled out. Whatever it is, it is used as given.
   kExplicit,
@@ -49,7 +57,7 @@ struct CaptureConfig {
   int32_t capture_width = 0;
   int32_t capture_height = 0;
   Retention retention = Retention::kSharpest;
-  Lens lens = Lens::kMain;
+  Lens lens = Lens::kUltrawide;
   std::string lens_id;  // only when lens is kExplicit
 
   // What ends a stretch of movement, and so how densely a capture is sampled.

@@ -147,7 +147,7 @@ default.
 ```
 capture   = max | 1920x1080     # largest the camera offers, or an exact size
 retention = sharpest | all      # selected frames, or every frame
-lens      = main | ultrawide | <camera id>
+lens      = ultrawide | main | <camera id>
 shift     = 0.12                # how far the picture may slide before a frame
 residual  = 0.06                # how much of it may stop matching
 ```
@@ -158,6 +158,13 @@ adb push capture.conf /sdcard/Android/data/com.sensor.logger/files/
 
 Every rear camera is logged at startup with its focal length, so `lens` can name
 one by id. On a Galaxy S25 Ultra two are offered: `0` at 6.3mm and `2` at 2.2mm.
+
+The default is `ultrawide`, the shortest focal length the device offers. It
+wins at both ends of the range this is used at: a frame covers far more of a
+room, which matters when free space is the budget, and it focuses closer than
+the main lens — 5cm against 10cm on the tested device, enough to beat it on
+close detail despite the wider field, since detail goes as the reciprocal of
+distance. The main lens is ahead only in between, by about 1.4x per degree.
 
 `main` is whichever the system lists first. That is usually a **logical**
 camera, which chooses a physical lens by zoom ratio and can change it during a
