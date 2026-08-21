@@ -224,9 +224,10 @@ Needs the Android SDK, NDK, and CMake; versions are pinned in
 emulator path — the capture path is a real camera.
 
 **Volume down** starts and stops recording. **Volume up** switches to the next
-rear lens, which ends any session in progress — the intrinsics change with the
-lens and nothing downstream expects that inside one session. Press **Home** to
-leave; that also closes the session cleanly.
+rear lens, and is refused while recording: the intrinsics change with the lens
+so a session cannot continue across one, and ending a capture because a key was
+brushed against a coat is a trip wasted. Stop, change, start again. Press
+**Home** to leave; that also closes the session cleanly.
 
 Touches are read but bound to nothing on purpose. A palm across the screen while
 the phone is pointed at something is not a decision, and a capture that stops

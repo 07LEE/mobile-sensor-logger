@@ -286,11 +286,17 @@ void ToggleRecording(AppState* state) {
   }
 }
 
-// Cycles through the rear cameras. Changing lens means restarting the camera,
-// so a session in progress is closed first rather than continued across a
-// change of intrinsics that nothing downstream would expect.
+// Cycles through the rear cameras.
+//
+// Refused while recording. Changing lens changes the intrinsics, so a session
+// cannot continue across one, and ending a capture because a key was brushed
+// against a coat is a trip wasted. Stopping first makes it deliberate: down to
+// stop, up to change, down to start again.
 void NextLens(AppState* state) {
-  if (state->recorder.is_recording()) state->recorder.Stop();
+  if (state->recorder.is_recording()) {
+    LogInfo("not changing lens while recording; stop first");
+    return;
+  }
 
   const std::string current = state->camera.info().id;
   state->camera.Stop();
