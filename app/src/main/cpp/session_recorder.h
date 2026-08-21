@@ -99,6 +99,18 @@ class SessionRecorder {
   }
   const std::string& session_path() const { return session_path_; }
 
+  struct SessionItem {
+    std::string name;
+    std::string full_path;
+    double megabytes = 0.0;
+  };
+
+  // Scans <root> directory and returns list of session items.
+  static std::vector<SessionItem> GetSessions(const std::string& session_root);
+
+  // Deletes one specific session directory.
+  static bool DeleteSessionPath(const std::string& full_path);
+
   // How far the picture slid since the last written frame, and how much of it
   // no offset lines up. Between them they are the only signal the device has
   // that a capture is covering new ground.

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "camera_image.h"
+#include "session_recorder.h"
 
 namespace sensor_logger {
 
@@ -66,11 +67,18 @@ class PreviewRenderer {
   float StatusHeightFraction(int columns, int rows) const;
 
   // Draws a labelled button at `top_fraction` down the screen and remembers
-  // where it landed. `enabled` greys it out; it is still drawn, because a
-  // control that disappears is a control nobody learns.
-  void DrawButton(const std::string& label, float top_fraction, bool enabled);
+  // where it landed. `enabled` greys it out.
+  void DrawLensButton(const std::string& label, float top_fraction, bool enabled);
+  bool LensButtonContains(float x, float y) const;
 
-  bool ButtonContains(float x, float y) const;
+  void DrawSessionsButton(const std::string& label, float top_fraction, bool enabled);
+  bool SessionsButtonContains(float x, float y) const;
+
+  // Render sessions overlay dialog with individual delete buttons and confirm state.
+  void DrawSessionsOverlay(const std::vector<SessionRecorder::SessionItem>& sessions,
+                           int pending_delete_index);
+  bool CloseOverlayContains(float x, float y) const;
+  int ItemDeleteOverlayTouched(float x, float y) const;
 
  private:
   void DrawQuad(GLuint program, float x0, float y0, float x1, float y1,
@@ -98,11 +106,32 @@ class PreviewRenderer {
   float camera_right_ = 0.0f;
   float camera_bottom_ = 0.0f;
 
-  // Likewise, set by the last DrawButton.
-  float button_left_ = 0.0f;
-  float button_top_ = 0.0f;
-  float button_right_ = 0.0f;
-  float button_bottom_ = 0.0f;
+  // Bounds set by DrawLensButton and DrawSessionsButton.
+  float lens_button_left_ = 0.0f;
+  float lens_button_top_ = 0.0f;
+  float lens_button_right_ = 0.0f;
+  float lens_button_bottom_ = 0.0f;
+
+  float sessions_button_left_ = 0.0f;
+  float sessions_button_top_ = 0.0f;
+  float sessions_button_right_ = 0.0f;
+  float sessions_button_bottom_ = 0.0f;
+
+  // Overlay button rects
+  float close_button_left_ = 0.0f;
+  float close_button_top_ = 0.0f;
+  float close_button_right_ = 0.0f;
+  float close_button_bottom_ = 0.0f;
+
+  float delete_all_button_left_ = 0.0f;
+  float delete_all_button_top_ = 0.0f;
+  float delete_all_button_right_ = 0.0f;
+  float delete_all_button_bottom_ = 0.0f;
+
+  struct ItemRect {
+    float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+  };
+  std::vector<ItemRect> item_delete_rects_;
   std::vector<uint8_t> chroma_pixels_;
 
   int viewport_width_ = 0;

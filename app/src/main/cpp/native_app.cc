@@ -88,6 +88,8 @@ struct AppState {
   // is what was capping the frame rate, and leaves nearly the whole OLED panel
   // switched off.
   bool preview_visible = false;
+  bool sessions_overlay_visible = false;
+  int pending_delete_index = -1;
   bool permission_granted = false;
 };
 
@@ -558,11 +560,42 @@ extern "C" void android_main(android_app* app) {
         break;
     }
 
-    // Only the button, not the screen at large. Changing lens moved to a touch
-    // when the volume keys ran out, and it is refused while recording, so the
-    // rule that nothing behind a touch can lose a capture still holds.
-    if (input.touched && state.preview.ButtonContains(input.x, input.y)) {
-      NextLens(&state);
+    if (state.recorder.is_recording()) {
+      state.sessions_overlay_visible = false;
+      state.pending_delete_index = -1;
+    }
+
+    if (input.touched) {
+      if (state.sessions_overlay_visible) {
+        if (state.preview.CloseOverlayContains(input.x, input.y)) {
+          state.sessions_overlay_visible = false;
+          state.pending_delete_index = -1;
+        } else {
+          int touched_idx = state.preview.ItemDeleteOverlayTouched(input.x, input.y);
+          if (touched_idx >= 0) {
+            if (state.pending_delete_index == touched_idx) {
+              const auto sessions = SessionRecorder::GetSessions(SessionRoot(state.app));
+              if (touched_idx < static_cast<int>(sessions.size())) {
+                SessionRecorder::DeleteSessionPath(sessions[static_cast<size_t>(touched_idx)].full_path);
+              }
+              state.pending_delete_index = -1;
+            } else {
+              state.pending_delete_index = touched_idx;
+            }
+          } else {
+            state.pending_delete_index = -1;
+          }
+        }
+      } else {
+        if (state.preview.LensButtonContains(input.x, input.y)) {
+          NextLens(&state);
+        } else if (state.preview.SessionsButtonContains(input.x, input.y)) {
+          if (!state.recorder.is_recording()) {
+            state.sessions_overlay_visible = !state.sessions_overlay_visible;
+            state.pending_delete_index = -1;
+          }
+        }
+      }
     }
 
     // Every couple of seconds at camera rate.
@@ -608,35 +641,44 @@ extern "C" void android_main(android_app* app) {
     std::snprintf(lens_label, sizeof(lens_label), "%s %.1FMM - TAP",
                   state.camera.LensName(), state.camera.info().focal_length_mm);
 
+    constexpr float kGap = 0.02f;
+    constexpr float kBtnHeight = 0.045f;
+
     if (state.preview_visible) {
-      // Out of the way of the picture: the numbers along the top, the control
-      // near the bottom where a thumb already is.
       state.preview.DrawCamera(state.camera.sensor_orientation(), 1.0f);
       state.preview.DrawStatus(StatusLines(state),
                                state.recorder.is_recording(), 0.0f, 40);
+      float btn_pos = 0.78f;
       if (lens_choice) {
-        state.preview.DrawButton(lens_label, 0.86f,
-                                 !state.recorder.is_recording());
+        state.preview.DrawLensButton(lens_label, btn_pos,
+                                     !state.recorder.is_recording());
+        btn_pos += kBtnHeight + kGap;
       }
+      state.preview.DrawSessionsButton("SESSIONS - TAP", btn_pos,
+                                       !state.recorder.is_recording());
     } else {
-      // Nothing else on the screen, so the block sits in the middle of it
-      // rather than pinned to the top edge with a screen of black underneath.
       constexpr int kColumns = 32;
-      constexpr float kGap = 0.03f;
-      const float button_height = 0.035f;
       const std::vector<std::string> lines = StatusLines(state);
       const float block =
-          state.preview.StatusHeightFraction(kColumns,
-                                             (int)lines.size()) +
-          (lens_choice ? kGap + button_height : 0.0f);
+          state.preview.StatusHeightFraction(kColumns, (int)lines.size()) +
+          (lens_choice ? kGap + kBtnHeight : 0.0f) + kGap + kBtnHeight;
       const float top = (1.0f - block) * 0.5f;
 
-      const float bottom = state.preview.DrawStatus(
+      float bottom = state.preview.DrawStatus(
           lines, state.recorder.is_recording(), top, kColumns);
       if (lens_choice) {
-        state.preview.DrawButton(lens_label, bottom + kGap,
-                                 !state.recorder.is_recording());
+        state.preview.DrawLensButton(lens_label, bottom + kGap,
+                                     !state.recorder.is_recording());
+        bottom += kBtnHeight + kGap;
       }
+      state.preview.DrawSessionsButton("SESSIONS - TAP", bottom + kGap,
+                                       !state.recorder.is_recording());
+    }
+
+    if (state.sessions_overlay_visible) {
+      const auto sessions =
+          SessionRecorder::GetSessions(SessionRoot(state.app));
+      state.preview.DrawSessionsOverlay(sessions, state.pending_delete_index);
     }
 
     eglSwapBuffers(state.display, state.surface);

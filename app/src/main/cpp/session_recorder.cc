@@ -1,10 +1,13 @@
 #include "session_recorder.h"
 
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/system_properties.h>
+#include <unistd.h>
 
 #include <cinttypes>
 #include <cstdio>
+#include <cstring>
 #include <utility>
 
 #include "sharpness.h"
@@ -366,6 +369,79 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"selection\": \"sharpest frame of each stretch; a stretch "
               "ends when the picture shifts or stops matching\"\n"
            << "}\n";
+}
+
+namespace {
+
+int64_t GetDirectorySize(const std::string& path) {
+  DIR* d = opendir(path.c_str());
+  if (!d) return 0;
+  int64_t total = 0;
+  struct dirent* p;
+  while ((p = readdir(d)) != nullptr) {
+    if (std::strcmp(p->d_name, ".") == 0 || std::strcmp(p->d_name, "..") == 0) continue;
+    std::string subpath = path + "/" + p->d_name;
+    struct stat statbuf;
+    if (stat(subpath.c_str(), &statbuf) == 0) {
+      if (S_ISDIR(statbuf.st_mode)) {
+        total += GetDirectorySize(subpath);
+      } else {
+        total += statbuf.st_size;
+      }
+    }
+  }
+  closedir(d);
+  return total;
+}
+
+bool RemoveDirectoryRecursive(const std::string& path) {
+  DIR* d = opendir(path.c_str());
+  if (!d) return false;
+  struct dirent* p;
+  while ((p = readdir(d)) != nullptr) {
+    if (std::strcmp(p->d_name, ".") == 0 || std::strcmp(p->d_name, "..") == 0) continue;
+    std::string subpath = path + "/" + p->d_name;
+    struct stat statbuf;
+    if (stat(subpath.c_str(), &statbuf) == 0) {
+      if (S_ISDIR(statbuf.st_mode)) {
+        RemoveDirectoryRecursive(subpath);
+      } else {
+        unlink(subpath.c_str());
+      }
+    }
+  }
+  closedir(d);
+  return rmdir(path.c_str()) == 0;
+}
+
+}  // namespace
+
+std::vector<SessionRecorder::SessionItem> SessionRecorder::GetSessions(
+    const std::string& session_root) {
+  std::vector<SessionItem> results;
+  DIR* d = opendir(session_root.c_str());
+  if (!d) return results;
+
+  struct dirent* p;
+  while ((p = readdir(d)) != nullptr) {
+    if (std::strcmp(p->d_name, ".") == 0 || std::strcmp(p->d_name, "..") == 0) continue;
+    std::string full_path = session_root + "/" + p->d_name;
+    struct stat statbuf;
+    if (stat(full_path.c_str(), &statbuf) == 0 && S_ISDIR(statbuf.st_mode)) {
+      int64_t bytes = GetDirectorySize(full_path);
+      SessionItem item;
+      item.name = p->d_name;
+      item.full_path = full_path;
+      item.megabytes = static_cast<double>(bytes) / (1024.0 * 1024.0);
+      results.push_back(item);
+    }
+  }
+  closedir(d);
+  return results;
+}
+
+bool SessionRecorder::DeleteSessionPath(const std::string& full_path) {
+  return RemoveDirectoryRecursive(full_path);
 }
 
 }  // namespace sensor_logger
