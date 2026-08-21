@@ -308,10 +308,20 @@ std::vector<std::string> StatusLines(const AppState& state,
   // The step is what to act on while filming: it is how far to move for the
   // next viewpoint, and it follows how far away the scene is rather than being
   // a fixed number to memorise.
-  std::snprintf(buffer, sizeof(buffer), "SCENE %.1FM  STEP %.0FCM  POINTS %d",
-                recorder.scene_distance_m(),
-                recorder.translation_threshold_m() * 100.0f,
-                (int)frame.point_cloud.size());
+  //
+  // Marked when nothing measured it. Captures have come back with the point
+  // cloud empty for whole sessions, and a fallback distance printed as though
+  // it had been measured is worse than no number: it looks like the step is
+  // tracking the scene when it is really a constant.
+  if (recorder.scene_distance_m() > 0.0f) {
+    std::snprintf(buffer, sizeof(buffer), "SCENE %.1FM  STEP %.0FCM  PTS %d",
+                  recorder.scene_distance_m(),
+                  recorder.translation_threshold_m() * 100.0f,
+                  (int)frame.point_cloud.size());
+  } else {
+    std::snprintf(buffer, sizeof(buffer), "SCENE ASSUMED  STEP %.0FCM  PTS 0",
+                  recorder.translation_threshold_m() * 100.0f);
+  }
   lines.emplace_back(buffer);
 
   std::snprintf(buffer, sizeof(buffer), "IMU %lld SAMPLES",

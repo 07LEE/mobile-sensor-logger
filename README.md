@@ -173,6 +173,16 @@ source disclosure, but they do place obligations on anything shipped: users must
 be told the app includes ARCore, and be given Google's terms and privacy policy.
 Read them before distributing a build.
 
+**The point cloud has not been reliable, and the parallax threshold rests on
+it.** Across every session captured so far, 92% of feature points came back as
+NaN, and six sessions out of sixteen produced no points at all — including the
+most recent, which wrote thirty-seven frames and one point. Where nothing
+measured the distance the threshold falls back to an assumption, which is safe
+but degenerates to a fixed step in metres again, so the readout says `ASSUMED`
+rather than printing a number that looks measured. Fixing this is what the next
+capture on a device has to establish; ARCore's depth API is the obvious
+alternative source if the sparse cloud stays this thin.
+
 Feature points that are not finite are dropped before anything sees them.
 Captures have come back with most of the point cloud as NaN — scattered through
 it rather than at one end, and permanent once it starts. Whether ARCore produces
