@@ -7,15 +7,22 @@
 #include <string>
 #include <vector>
 
+#include "camera_image.h"
+
 namespace sensor_logger {
 
 // Draws the camera image and a status readout onto the screen.
 //
-// Without this the screen is black. ARCore renders the camera into an external
-// texture whether or not anything samples it, so a capture could be framed at
-// the ceiling, or not recording at all, and nothing on the device would say so
-// — the only way to know was to read logcat from a workstation, which is not
+// Without this the screen is black, and a capture could be framed at the
+// ceiling, or not recording at all, with nothing on the device saying so — the
+// only way to know would be reading logcat from a workstation, which is not
 // available while actually walking around filming.
+//
+// The camera hands over YUV planes, so the conversion happens here: luma and
+// chroma go up as two textures and the shader combines them. The chroma is
+// packed on the way because the planes arrive in whichever layout the device
+// prefers, and a shader that had to handle each of them would be three
+// shaders.
 //
 // The readout is drawn from a five-by-seven bitmap font rasterised on the CPU
 // into a small single-channel texture. A real text stack would mean a font
@@ -34,9 +41,13 @@ class PreviewRenderer {
 
   void SetViewport(int width, int height);
 
-  // Draws the camera texture over the whole screen. `uvs` are the eight texture
-  // coordinates ARCore produced for the screen corners.
-  void DrawCamera(uint32_t camera_texture, const float* uvs);
+  // Uploads one camera frame. Cheap enough per frame at preview resolution;
+  // this is not the capture stream.
+  bool UploadCamera(const CameraImageView& image);
+
+  // Draws the last uploaded frame, rotated upright by `sensor_orientation`
+  // degrees and letterboxed to keep its shape.
+  void DrawCamera(int32_t sensor_orientation);
 
   // Draws `lines` at the top of the screen over a dark panel, plus a filled
   // marker that is red while recording and grey otherwise.
@@ -50,10 +61,18 @@ class PreviewRenderer {
   GLuint camera_program_ = 0;
   GLuint quad_program_ = 0;
   GLuint vbo_ = 0;
+  GLuint luma_texture_ = 0;
+  GLuint chroma_texture_ = 0;
   GLuint text_texture_ = 0;
   GLuint white_texture_ = 0;
 
   GLint quad_color_location_ = -1;
+
+  int32_t camera_width_ = 0;
+  int32_t camera_height_ = 0;
+  bool camera_uploaded_ = false;
+  float luma_edge_ = 1.0f;
+  std::vector<uint8_t> chroma_pixels_;
 
   int viewport_width_ = 0;
   int viewport_height_ = 0;

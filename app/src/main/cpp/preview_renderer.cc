@@ -9,10 +9,6 @@ namespace {
 
 constexpr char kTag[] = "sensor_logger";
 
-// GLES3/gl3.h does not declare the external-image extension ARCore renders
-// through, and the NDK's gl2ext.h pulls in the ES 2 headers alongside it.
-constexpr GLenum kTextureExternalOes = 0x8D65;
-
 // Columns of a five-by-seven glyph, least significant bit at the top row. Only
 // the characters the status lines use are here; anything else draws as a blank.
 constexpr int kGlyphWidth = 5;
@@ -95,13 +91,24 @@ void main() {
 }
 )";
 
+// BT.601 studio swing, which is what YUV_420_888 carries. Getting this wrong
+// shows up as a preview that is merely a bit flat, so it is worth being exact
+// rather than eyeballing it.
 constexpr char kCameraFragmentShader[] = R"(#version 300 es
-#extension GL_OES_EGL_image_external_essl3 : require
 precision mediump float;
-uniform samplerExternalOES u_texture;
+uniform sampler2D u_luma;
+uniform sampler2D u_chroma;
 in vec2 v_uv;
 out vec4 o_color;
-void main() { o_color = texture(u_texture, v_uv); }
+void main() {
+  float y = texture(u_luma, v_uv).r;
+  vec2 uv = texture(u_chroma, v_uv).rg - vec2(0.5, 0.5);
+  y = (y - 0.0625) * 1.164384;
+  o_color = vec4(y + 1.596027 * uv.y,
+                 y - 0.391762 * uv.x - 0.812968 * uv.y,
+                 y + 2.017232 * uv.x,
+                 1.0);
+}
 )";
 
 // One program covers both the solid panels and the text: the text texture is
@@ -187,6 +194,20 @@ bool PreviewRenderer::Init() {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+  glGenTextures(1, &luma_texture_);
+  glBindTexture(GL_TEXTURE_2D, luma_texture_);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  glGenTextures(1, &chroma_texture_);
+  glBindTexture(GL_TEXTURE_2D, chroma_texture_);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
   const uint8_t opaque = 0xFF;
   glGenTextures(1, &white_texture_);
   glBindTexture(GL_TEXTURE_2D, white_texture_);
@@ -200,12 +221,17 @@ bool PreviewRenderer::Init() {
 
 void PreviewRenderer::Destroy() {
   if (vbo_ != 0) glDeleteBuffers(1, &vbo_);
+  if (luma_texture_ != 0) glDeleteTextures(1, &luma_texture_);
+  if (chroma_texture_ != 0) glDeleteTextures(1, &chroma_texture_);
   if (text_texture_ != 0) glDeleteTextures(1, &text_texture_);
   if (white_texture_ != 0) glDeleteTextures(1, &white_texture_);
   if (camera_program_ != 0) glDeleteProgram(camera_program_);
   if (quad_program_ != 0) glDeleteProgram(quad_program_);
 
   vbo_ = 0;
+  luma_texture_ = 0;
+  chroma_texture_ = 0;
+  camera_uploaded_ = false;
   text_texture_ = 0;
   white_texture_ = 0;
   camera_program_ = 0;
@@ -238,18 +264,105 @@ void PreviewRenderer::DrawQuad(GLuint program, float x0, float y0, float x1,
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
 
-void PreviewRenderer::DrawCamera(uint32_t camera_texture, const float* uvs) {
-  // The camera fills the screen, so there is nothing underneath it to clear or
-  // blend against, and it carries no depth.
+bool PreviewRenderer::UploadCamera(const CameraImageView& image) {
+  if (!image.valid || image.planes[0].data == nullptr) return false;
+
+  const ImagePlane& luma = image.planes[0];
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+  // The row stride is the width of the upload, and the extra columns are
+  // trimmed by the texture coordinates rather than by copying every row into a
+  // packed buffer first.
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, luma_texture_);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, luma.row_stride, image.height, 0,
+               GL_RED, GL_UNSIGNED_BYTE, luma.data);
+
+  // Chroma is packed here rather than uploaded in place. The planes arrive
+  // planar on some devices and interleaved on others, in either order, and one
+  // packed buffer is cheaper than three shaders. At preview size this is a few
+  // hundred kilobytes.
+  const int32_t chroma_width = image.width / 2;
+  const int32_t chroma_height = image.height / 2;
+  chroma_pixels_.resize(static_cast<size_t>(chroma_width) * chroma_height * 2);
+
+  const ImagePlane& u = image.planes[1];
+  const ImagePlane& v = image.planes[2];
+  for (int32_t y = 0; y < chroma_height; ++y) {
+    const uint8_t* u_row = u.data + static_cast<size_t>(y) * u.row_stride;
+    const uint8_t* v_row = v.data + static_cast<size_t>(y) * v.row_stride;
+    uint8_t* out = &chroma_pixels_[static_cast<size_t>(y) * chroma_width * 2];
+
+    for (int32_t x = 0; x < chroma_width; ++x) {
+      out[x * 2] = u_row[static_cast<size_t>(x) * u.pixel_stride];
+      out[x * 2 + 1] = v_row[static_cast<size_t>(x) * v.pixel_stride];
+    }
+  }
+
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, chroma_texture_);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, chroma_width, chroma_height, 0, GL_RG,
+               GL_UNSIGNED_BYTE, chroma_pixels_.data());
+
+  camera_width_ = image.width;
+  camera_height_ = image.height;
+  // Luma was uploaded stride-wide, so its right edge is padding.
+  luma_edge_ = static_cast<float>(image.width) /
+               static_cast<float>(luma.row_stride > 0 ? luma.row_stride : 1);
+  camera_uploaded_ = true;
+  return true;
+}
+
+void PreviewRenderer::DrawCamera(int32_t sensor_orientation) {
+  if (!camera_uploaded_ || viewport_width_ <= 0 || viewport_height_ <= 0) return;
+
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_BLEND);
 
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(kTextureExternalOes, camera_texture);
-  glUseProgram(camera_program_);
-  glUniform1i(glGetUniformLocation(camera_program_, "u_texture"), 0);
+  // Corners of the image, in the strip order the quad is drawn in, rotated so
+  // the sensor's idea of up matches the screen's. Phones mount the sensor on
+  // its side, so this is 90 degrees far more often than it is zero.
+  const float e = luma_edge_;
+  const float corners[4][8] = {
+      {0, 1, e, 1, 0, 0, e, 0},  // 0
+      {0, 0, 0, 1, e, 0, e, 1},  // 90
+      {e, 0, 0, 0, e, 1, 0, 1},  // 180
+      {e, 1, e, 0, 0, 1, 0, 0},  // 270
+  };
+  const int index = ((sensor_orientation % 360) + 360) % 360 / 90;
+  const float* uvs = corners[index & 3];
 
-  DrawQuad(camera_program_, -1.0f, -1.0f, 1.0f, 1.0f, uvs);
+  // Letterboxed rather than stretched: a preview that lies about the shape of
+  // the frame is worse than one with bars, because framing is the whole point.
+  const bool swapped = (index & 1) != 0;
+  const float image_width =
+      static_cast<float>(swapped ? camera_height_ : camera_width_);
+  const float image_height =
+      static_cast<float>(swapped ? camera_width_ : camera_height_);
+
+  const float image_aspect = image_width / image_height;
+  const float screen_aspect = static_cast<float>(viewport_width_) /
+                              static_cast<float>(viewport_height_);
+
+  float half_width = 1.0f;
+  float half_height = 1.0f;
+  if (image_aspect > screen_aspect) {
+    half_height = screen_aspect / image_aspect;
+  } else {
+    half_width = image_aspect / screen_aspect;
+  }
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, luma_texture_);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, chroma_texture_);
+
+  glUseProgram(camera_program_);
+  glUniform1i(glGetUniformLocation(camera_program_, "u_luma"), 0);
+  glUniform1i(glGetUniformLocation(camera_program_, "u_chroma"), 1);
+
+  DrawQuad(camera_program_, -half_width, -half_height, half_width, half_height,
+           uvs);
 }
 
 void PreviewRenderer::RasterizeText(const std::vector<std::string>& lines) {

@@ -5,19 +5,19 @@
 #include <game-activity/native_app_glue/android_native_app_glue.h>
 
 #include <cstdio>
-#include <memory>
 #include <string>
 #include <vector>
 
-#include "ar_session.h"
-#include "camera_timestamp_probe.h"
+#include "camera_image.h"
+#include "camera_source.h"
 #include "imu_source.h"
 #include "preview_renderer.h"
 #include "session_recorder.h"
 
 namespace {
 
-using sensor_logger::ArSession;
+using sensor_logger::CameraImageView;
+using sensor_logger::CameraSource;
 using sensor_logger::FrameData;
 using sensor_logger::ImuSample;
 using sensor_logger::ImuSource;
@@ -26,7 +26,6 @@ using sensor_logger::PreviewRenderer;
 using sensor_logger::SessionRecorder;
 
 constexpr char kTag[] = "sensor_logger";
-constexpr GLenum kTextureExternalOes = 0x8D65;
 
 void LogInfo(const char* what) {
   __android_log_print(ANDROID_LOG_INFO, kTag, "%s", what);
@@ -44,15 +43,14 @@ struct AppState {
   EGLDisplay display = EGL_NO_DISPLAY;
   EGLSurface surface = EGL_NO_SURFACE;
   EGLContext context = EGL_NO_CONTEXT;
-  GLuint camera_texture = 0;
   int width = 0;
   int height = 0;
 
-  ArSession ar_session;
+  CameraSource camera;
   ImuSource imu;
   PreviewRenderer preview;
   SessionRecorder recorder;
-  bool ar_started = false;
+  bool capturing = false;
   bool permission_granted = false;
 };
 
@@ -118,8 +116,6 @@ bool InitDisplay(AppState* state) {
                                    8,
                                    EGL_RED_SIZE,
                                    8,
-                                   EGL_DEPTH_SIZE,
-                                   16,
                                    EGL_NONE};
 
   EGLConfig config;
@@ -144,12 +140,6 @@ bool InitDisplay(AppState* state) {
   eglQuerySurface(state->display, state->surface, EGL_WIDTH, &state->width);
   eglQuerySurface(state->display, state->surface, EGL_HEIGHT, &state->height);
 
-  // ARCore writes the camera image into an external OES texture.
-  glGenTextures(1, &state->camera_texture);
-  glBindTexture(kTextureExternalOes, state->camera_texture);
-  glTexParameteri(kTextureExternalOes, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(kTextureExternalOes, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
   if (!state->preview.Init()) {
     LogError("could not build the preview shaders");
     return false;
@@ -160,9 +150,6 @@ bool InitDisplay(AppState* state) {
 }
 
 void TerminateDisplay(AppState* state) {
-  state->ar_session.Pause();
-  state->ar_started = false;
-
   // Before the context goes away, since the objects belong to it.
   state->preview.Destroy();
 
@@ -181,108 +168,44 @@ void TerminateDisplay(AppState* state) {
   state->display = EGL_NO_DISPLAY;
   state->context = EGL_NO_CONTEXT;
   state->surface = EGL_NO_SURFACE;
-  state->camera_texture = 0;
 }
 
-void StartAr(AppState* state) {
-  if (state->ar_started) return;
+void StartCapture(AppState* state) {
+  if (state->capturing) return;
+  if (!state->permission_granted) return;
 
-  JNIEnv* env = nullptr;
-  state->app->activity->vm->AttachCurrentThread(&env, nullptr);
-
-  if (!state->ar_session.IsValid()) {
-    if (!state->ar_session.Create(env, state->app->activity->javaGameActivity)) {
-      LogError("could not create ARCore session");
-      return;
-    }
-  }
-
-  state->ar_session.SetCameraTexture(state->camera_texture);
-  state->ar_session.SetDisplayGeometry(0, state->width, state->height);
-
-  if (!state->ar_session.Resume()) {
-    LogError("could not resume ARCore session");
+  if (!state->camera.Start()) {
+    LogError("could not start the camera");
     return;
   }
 
-  state->ar_started = true;
-  LogInfo("ARCore session running");
+  state->capturing = true;
 
-  // Inertial capture starts with the AR session, not with the app. Both stay
-  // running for the whole session, independent of whether ARCore is tracking:
-  // the samples covering a gap are exactly the ones that could bridge it later.
+  // Inertial capture starts with the camera and stops with it. Both run for the
+  // whole session, and the samples covering a gap in the images are exactly the
+  // ones that could bridge it later.
   //
-  // Starting earlier would stall the main loop. The sensor queue shares the
-  // looper, and until the AR session exists that loop waits on the looper with
-  // a timeout; a stream of sensor events keeps it there, and the camera
-  // permission is only re-checked once it comes back out.
+  // Not started earlier: the sensor queue shares the looper, and until there is
+  // a camera to wait on, a stream of sensor events would hold the main loop in
+  // its drain loop, where the camera permission is never re-checked.
   state->imu.Start(state->app->looper, "com.sensor.logger");
 }
 
-void ToggleRecording(AppState* state, const FrameData& frame) {
-  if (state->recorder.is_recording()) {
-    state->recorder.Stop();
-    __android_log_print(
-        ANDROID_LOG_INFO, kTag,
-        "stopped: %lld written from %lld considered, %lld untracked, "
-        "%lld without image, %lld dropped, %lld imu samples",
-        static_cast<long long>(state->recorder.written_frames()),
-        static_cast<long long>(state->recorder.considered_frames()),
-        static_cast<long long>(state->recorder.untracked_frames()),
-        static_cast<long long>(state->recorder.frames_without_image()),
-        static_cast<long long>(state->recorder.dropped_frames()),
-        static_cast<long long>(state->recorder.imu_samples()));
-    return;
-  }
+void StopCapture(AppState* state) {
+  if (!state->capturing) return;
 
-  if (state->recorder.Start(SessionRoot(state->app), frame.timestamp_ns)) {
-    __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
-                        state->recorder.session_path().c_str());
-  } else {
-    LogError("could not start recording");
-  }
-}
-
-void HandleCommand(android_app* app, int32_t cmd) {
-  auto* state = static_cast<AppState*>(app->userData);
-
-  switch (cmd) {
-    case APP_CMD_INIT_WINDOW:
-      if (app->window != nullptr && InitDisplay(state)) {
-        if (state->permission_granted) StartAr(state);
-      }
-      break;
-
-    case APP_CMD_TERM_WINDOW:
-      TerminateDisplay(state);
-      break;
-
-    case APP_CMD_PAUSE:
-      // Stopping here rather than on destroy: a session left open across a
-      // backgrounding would be truncated with no manifest.
-      state->recorder.Stop();
-      state->ar_session.Pause();
-      state->ar_started = false;
-      break;
-
-    case APP_CMD_RESUME:
-      if (state->display != EGL_NO_DISPLAY && state->permission_granted) {
-        StartAr(state);
-      }
-      break;
-
-    default:
-      break;
-  }
+  state->recorder.Stop();
+  state->imu.Stop();
+  state->camera.Stop();
+  state->capturing = false;
 }
 
 // The readout drawn over the preview.
 //
 // These are the numbers that decide whether a capture is worth keeping, and
-// until now they existed only in logcat — which is not readable while walking
-// around with the phone, which is the only time they could change anything.
-std::vector<std::string> StatusLines(const AppState& state,
-                                     const FrameData& frame) {
+// without them on screen they exist only in logcat, which cannot be read while
+// walking around with the phone — the only time they could change anything.
+std::vector<std::string> StatusLines(const AppState& state) {
   const SessionRecorder& recorder = state.recorder;
   char buffer[64];
   std::vector<std::string> lines;
@@ -292,36 +215,19 @@ std::vector<std::string> StatusLines(const AppState& state,
                   (long long)recorder.written_frames(),
                   (long long)recorder.considered_frames());
   } else {
-    std::snprintf(buffer, sizeof(buffer), "IDLE - WAITING FOR TRACKING");
+    std::snprintf(buffer, sizeof(buffer), "IDLE - WAITING FOR THE CAMERA");
   }
   lines.emplace_back(buffer);
 
-  if (frame.is_tracking) {
-    lines.emplace_back("TRACKING");
-  } else {
-    std::snprintf(buffer, sizeof(buffer), "NO TRACKING: %s",
-                  frame.tracking_failure != nullptr ? frame.tracking_failure
-                                                    : "STARTING UP");
-    lines.emplace_back(buffer);
-  }
+  std::snprintf(buffer, sizeof(buffer), "CAPTURE %dX%d",
+                state.camera.capture_width(), state.camera.capture_height());
+  lines.emplace_back(buffer);
 
-  // The step is what to act on while filming: it is how far to move for the
-  // next viewpoint, and it follows how far away the scene is rather than being
-  // a fixed number to memorise.
-  //
-  // Marked when nothing measured it. Captures have come back with the point
-  // cloud empty for whole sessions, and a fallback distance printed as though
-  // it had been measured is worse than no number: it looks like the step is
-  // tracking the scene when it is really a constant.
-  if (recorder.scene_distance_m() > 0.0f) {
-    std::snprintf(buffer, sizeof(buffer), "SCENE %.1FM  STEP %.0FCM  PTS %d",
-                  recorder.scene_distance_m(),
-                  recorder.translation_threshold_m() * 100.0f,
-                  (int)frame.point_cloud.size());
-  } else {
-    std::snprintf(buffer, sizeof(buffer), "SCENE ASSUMED  STEP %.0FCM  PTS 0",
-                  recorder.translation_threshold_m() * 100.0f);
-  }
+  // Movement since the last kept frame. Nothing else on the device says whether
+  // the capture is covering new ground, now that there is no pose to ask.
+  std::snprintf(buffer, sizeof(buffer), "SHIFT %.0F%%  DIFF %.0F%%",
+                recorder.last_shift() * 100.0f,
+                recorder.last_residual() * 100.0f);
   lines.emplace_back(buffer);
 
   std::snprintf(buffer, sizeof(buffer), "IMU %lld SAMPLES",
@@ -338,22 +244,34 @@ std::vector<std::string> StatusLines(const AppState& state,
   return lines;
 }
 
-// Any tap toggles recording. A real UI comes later; this keeps the capture
-// path exercisable without one.
-bool ConsumeTap(android_app* app) {
-  auto* input = android_app_swap_input_buffers(app);
-  if (input == nullptr) return false;
+void HandleCommand(android_app* app, int32_t cmd) {
+  auto* state = static_cast<AppState*>(app->userData);
 
-  bool tapped = false;
-  for (uint64_t i = 0; i < input->motionEventsCount; ++i) {
-    const GameActivityMotionEvent& event = input->motionEvents[i];
-    if ((event.action & AMOTION_EVENT_ACTION_MASK) ==
-        AMOTION_EVENT_ACTION_DOWN) {
-      tapped = true;
-    }
+  switch (cmd) {
+    case APP_CMD_INIT_WINDOW:
+      if (app->window != nullptr && InitDisplay(state)) {
+        StartCapture(state);
+      }
+      break;
+
+    case APP_CMD_TERM_WINDOW:
+      TerminateDisplay(state);
+      break;
+
+    case APP_CMD_PAUSE:
+      // Stopping the session here rather than on destroy: one left open across
+      // a backgrounding would be truncated with no manifest. The camera has to
+      // go too — Android takes it away regardless.
+      StopCapture(state);
+      break;
+
+    case APP_CMD_RESUME:
+      if (state->display != EGL_NO_DISPLAY) StartCapture(state);
+      break;
+
+    default:
+      break;
   }
-  android_app_clear_motion_events(input);
-  return tapped;
 }
 
 }  // namespace
@@ -364,34 +282,24 @@ extern "C" void android_main(android_app* app) {
   app->userData = &state;
   app->onAppCmd = HandleCommand;
 
-  // Null filter means every motion event reaches the input buffer. The default
-  // one admits only touchscreen sources, which is not what arrives here.
-  android_app_set_motion_event_filter(app, nullptr);
-
-  sensor_logger::LogCameraTimestampSource();
-
   state.permission_granted = HasCameraPermission(app);
   if (!state.permission_granted) {
     RequestCameraPermission(app);
   }
 
   FrameData frame;
+  CameraImageView preview_image;
   std::vector<ImuSample> imu_samples;
 
   while (true) {
     int events = 0;
     android_poll_source* source = nullptr;
 
-    // The timeout is re-evaluated on every call, not hoisted: the window
-    // arrives and AR starts inside this drain loop, and a value captured
-    // beforehand would leave the loop waiting forever afterwards. Nothing would
-    // wake it either, because GameActivity delivers input through its own
-    // buffer rather than the looper.
-    //
-    // Once AR is running the timeout is zero, so the loop paces itself on
-    // ArSession_update's blocking mode instead of the event queue.
+    // The timeout is zero once the camera is running, so the loop paces itself
+    // on frames arriving rather than on the event queue, and 50ms before that
+    // so it is not spinning while waiting for a window.
     int ident = 0;
-    while ((ident = ALooper_pollOnce(state.ar_started ? 0 : 50, nullptr, &events,
+    while ((ident = ALooper_pollOnce(state.capturing ? 0 : 50, nullptr, &events,
                                      reinterpret_cast<void**>(&source))) >= 0) {
       if (source != nullptr) source->process(app, source);
 
@@ -399,15 +307,14 @@ extern "C" void android_main(android_app* app) {
       // and pollOnce keeps returning that identifier until something reads the
       // events. Draining has to happen here rather than beside the frame step
       // below, which this loop would otherwise never reach: four hundred
-      // samples a second means there is always another event pending, so the
-      // loop spins forever and no frame is ever captured.
+      // samples a second means there is always another event pending.
       if (ident == ImuSource::kLooperIdent) {
         state.imu.Drain(&imu_samples);
         state.recorder.RecordImu(imu_samples);
       }
 
       if (app->destroyRequested != 0) {
-        state.recorder.Stop();
+        StopCapture(&state);
         TerminateDisplay(&state);
         return;
       }
@@ -416,40 +323,50 @@ extern "C" void android_main(android_app* app) {
     if (!state.permission_granted) {
       state.permission_granted = HasCameraPermission(app);
       if (state.permission_granted && state.display != EGL_NO_DISPLAY) {
-        StartAr(&state);
+        StartCapture(&state);
       }
       continue;
     }
 
-    if (!state.ar_started) continue;
+    if (!state.capturing) continue;
 
-    if (state.ar_session.Update(&frame)) {
+    if (state.camera.AcquireFrame(&frame)) {
+      // Recording starts on its own with the first frame. There is no UI to
+      // start it from, and GameActivity is not delivering touch events to the
+      // native buffer, so waiting for a tap would mean capturing nothing.
+      if (!state.recorder.is_recording()) {
+        if (state.recorder.Start(SessionRoot(app), frame.timestamp_ns)) {
+          __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
+                              state.recorder.session_path().c_str());
+        } else {
+          LogError("could not start recording");
+        }
+      }
+
       state.recorder.Record(frame);
     }
 
-    // Recording starts on its own once ARCore is tracking. There is no UI yet
-    // to start it from, and GameActivity is not delivering touch events to the
-    // native buffer, so waiting for a tap would mean never capturing anything.
-    if (frame.is_tracking && !state.recorder.is_recording()) {
-      ToggleRecording(&state, frame);
+    if (state.display == EGL_NO_DISPLAY) continue;
+
+    if (state.camera.AcquirePreviewFrame(&preview_image)) {
+      state.preview.UploadCamera(preview_image);
     }
 
-    static int heartbeat = 0;
-    if (++heartbeat % 90 == 0) {
-      __android_log_print(
-          ANDROID_LOG_INFO, kTag,
-          "tracking=%d recording=%d written=%lld dropped=%lld",
-          (int)frame.is_tracking, (int)state.recorder.is_recording(),
-          (long long)state.recorder.written_frames(),
-          (long long)state.recorder.dropped_frames());
-    }
-
-    if (ConsumeTap(app)) ToggleRecording(&state, frame);
-
-    state.preview.DrawCamera(state.camera_texture, frame.background_uvs.data());
-    state.preview.DrawStatus(StatusLines(state, frame),
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    state.preview.DrawCamera(state.camera.sensor_orientation());
+    state.preview.DrawStatus(StatusLines(state),
                              state.recorder.is_recording());
 
     eglSwapBuffers(state.display, state.surface);
+
+    static int heartbeat = 0;
+    if (++heartbeat % 90 == 0) {
+      __android_log_print(ANDROID_LOG_INFO, kTag,
+                          "recording=%d written=%lld dropped=%lld",
+                          (int)state.recorder.is_recording(),
+                          (long long)state.recorder.written_frames(),
+                          (long long)state.recorder.dropped_frames());
+    }
   }
 }

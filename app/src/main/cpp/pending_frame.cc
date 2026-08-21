@@ -8,8 +8,6 @@ namespace sensor_logger {
 void PendingFrame::Set(const FrameData& frame, float sharpness) {
   sharpness_ = sharpness;
   timestamp_ns_ = frame.timestamp_ns;
-  pose_ = frame.pose;
-  intrinsics_ = frame.intrinsics;
 
   const CameraImageView& image = frame.image;
   width_ = image.width;

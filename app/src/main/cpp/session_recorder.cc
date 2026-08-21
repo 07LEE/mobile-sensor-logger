@@ -2,10 +2,9 @@
 
 #include <sys/stat.h>
 
-#include <algorithm>
 #include <cinttypes>
-#include <cmath>
 #include <cstdio>
+#include <utility>
 
 #include "sharpness.h"
 
@@ -16,37 +15,6 @@ namespace {
 // survives subsampling, and this has to run on every frame the camera produces.
 constexpr int32_t kSharpnessStep = 4;
 
-// Median distance from the camera to the points ARCore is tracking this frame.
-//
-// How far away the scene is decides what counts as a new viewpoint. Five
-// centimetres beside a desk is a genuinely different angle on the subject; five
-// centimetres beside a far wall is the same photograph. A threshold in metres
-// cannot tell those apart, and tuning one against real captures needs the
-// distance it should have been measured against, recorded at the time.
-//
-// The median rather than the mean, because ARCore's cloud carries stray points
-// far behind the subject that would drag an average out. `scratch` is reused
-// across frames to keep this off the allocator.
-float MedianPointDistance(const FrameData& frame, std::vector<float>* scratch) {
-  scratch->clear();
-  scratch->reserve(frame.point_cloud.size());
-
-  for (const FeaturePoint& point : frame.point_cloud) {
-    const float dx = point.x - frame.pose.translation[0];
-    const float dy = point.y - frame.pose.translation[1];
-    const float dz = point.z - frame.pose.translation[2];
-    scratch->push_back(std::sqrt(dx * dx + dy * dy + dz * dz));
-  }
-
-  if (scratch->empty()) return 0.0f;
-
-  const size_t middle = scratch->size() / 2;
-  std::nth_element(scratch->begin(), scratch->begin() + middle, scratch->end());
-
-  const float median = (*scratch)[middle];
-  return std::isfinite(median) ? median : 0.0f;
-}
-
 bool MakeDirectory(const std::string& path) {
   if (mkdir(path.c_str(), 0755) == 0) return true;
   // Reusing an existing directory is fine; anything else is a real failure.
@@ -54,7 +22,7 @@ bool MakeDirectory(const std::string& path) {
   return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
 }
 
-// ARCore timestamps are nanoseconds on the system clock, which is monotonic and
+// Camera timestamps are nanoseconds on the boot clock, which is monotonic and
 // carries no wall time, so the id is derived from the session's own start
 // instant rather than a date.
 std::string SessionId(int64_t start_timestamp_ns) {
@@ -64,22 +32,22 @@ std::string SessionId(int64_t start_timestamp_ns) {
   return buffer;
 }
 
-const char* ChromaLayoutName(ChromaLayout layout) {
-  switch (layout) {
-    case ChromaLayout::kSemiPlanarUFirst:
-      return "semi_planar_uv";
-    case ChromaLayout::kSemiPlanarVFirst:
-      return "semi_planar_vu";
-    case ChromaLayout::kPlanar:
-      break;
-  }
-  return "planar";
-}
-
 std::string FrameFilename(int64_t timestamp_ns) {
   char buffer[64];
   std::snprintf(buffer, sizeof(buffer), "%" PRId64 ".yuv", timestamp_ns);
   return buffer;
+}
+
+const char* ChromaLayoutName(ChromaLayout layout) {
+  switch (layout) {
+    case ChromaLayout::kPlanar:
+      return "planar";
+    case ChromaLayout::kSemiPlanarUFirst:
+      return "semi_planar_uv";
+    case ChromaLayout::kSemiPlanarVFirst:
+      return "semi_planar_vu";
+  }
+  return "planar";
 }
 
 }  // namespace
@@ -95,40 +63,34 @@ bool SessionRecorder::Start(const std::string& root,
   if (!MakeDirectory(session_path_)) return false;
   if (!MakeDirectory(session_path_ + "/frames")) return false;
 
-  poses_.open(session_path_ + "/poses.csv", std::ios::out | std::ios::trunc);
   frames_.open(session_path_ + "/frames.csv", std::ios::out | std::ios::trunc);
   imu_.open(session_path_ + "/imu.csv", std::ios::out | std::ios::trunc);
   candidates_.open(session_path_ + "/candidates.csv",
                    std::ios::out | std::ios::trunc);
-  if (!poses_.is_open() || !frames_.is_open() || !imu_.is_open() ||
-      !candidates_.is_open()) {
-    poses_.close();
+  if (!frames_.is_open() || !imu_.is_open() || !candidates_.is_open()) {
     frames_.close();
     imu_.close();
     candidates_.close();
     return false;
   }
 
-  poses_ << "timestamp_ns,tx,ty,tz,qx,qy,qz,qw,"
-            "fx,fy,cx,cy,image_width,image_height\n";
-  imu_ << "timestamp_ns,sensor,x,y,z\n";
-  candidates_ << "timestamp_ns,tx,ty,tz,qx,qy,qz,qw,sharpness,point_count,"
-                 "median_point_distance_m,translation_threshold_m\n";
   frames_ << "timestamp_ns,filename,width,height,sharpness,chroma_layout,"
              "luma_row_stride,chroma_row_stride,chroma_pixel_stride,"
              "segment0_length,segment1_length,segment2_length\n";
+  imu_ << "timestamp_ns,sensor,x,y,z\n";
+  candidates_ << "timestamp_ns,sharpness,shift,residual\n";
 
+  motion_.Reset();
+  pending_.Clear();
   writer_.Start([this](PendingFrame& frame) { WriteFrame(frame); });
 
   start_timestamp_ns_ = start_timestamp_ns;
   last_timestamp_ns_ = start_timestamp_ns;
   written_frames_ = 0;
   considered_frames_ = 0;
-  untracked_frames_ = 0;
   frames_without_image_ = 0;
   imu_samples_ = 0;
-  selector_.Reset();
-  pending_.Clear();
+
   recording_ = true;
   return true;
 }
@@ -137,13 +99,6 @@ void SessionRecorder::Record(const FrameData& frame) {
   if (!recording_) return;
 
   last_timestamp_ns_ = frame.timestamp_ns;
-
-  // A pose from a frame that was not tracking is meaningless, and so is the
-  // image that goes with it, since nothing could place it later.
-  if (!frame.is_tracking) {
-    ++untracked_frames_;
-    return;
-  }
 
   if (!frame.image.valid) {
     ++frames_without_image_;
@@ -157,15 +112,14 @@ void SessionRecorder::Record(const FrameData& frame) {
       LumaSharpness(luma.data, frame.image.width, frame.image.height,
                     luma.row_stride, kSharpnessStep);
 
-  const float scene_distance =
-      MedianPointDistance(frame, &distance_scratch_);
-  scene_distance_m_ = scene_distance;
+  // Before the decision, so the row describes the frame as it was offered
+  // rather than as it was treated.
+  const bool moved = motion_.Accept(frame.image);
+  WriteCandidate(frame.timestamp_ns, sharpness);
 
-  WriteCandidate(frame, sharpness, scene_distance);
-
-  // Moving past the threshold closes the current stretch: whatever the sharpest
-  // frame in it turned out to be is written now, and this frame opens the next.
-  if (selector_.Accept(frame.pose, scene_distance)) {
+  // Enough movement closes the current stretch: whatever the sharpest frame in
+  // it turned out to be is written now, and this frame opens the next.
+  if (moved) {
     FlushPending();
     pending_.Set(frame, sharpness);
     return;
@@ -188,16 +142,9 @@ void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
   imu_.flush();
 }
 
-void SessionRecorder::WriteCandidate(const FrameData& frame, float sharpness,
-                                    float scene_distance_m) {
-  const CameraPose& pose = frame.pose;
-  candidates_ << frame.timestamp_ns << ',' << pose.translation[0] << ','
-              << pose.translation[1] << ',' << pose.translation[2] << ','
-              << pose.rotation[0] << ',' << pose.rotation[1] << ','
-              << pose.rotation[2] << ',' << pose.rotation[3] << ','
-              << sharpness << ',' << frame.point_cloud.size() << ','
-              << scene_distance_m << ','
-              << selector_.translation_threshold_m() << '\n';
+void SessionRecorder::WriteCandidate(int64_t timestamp_ns, float sharpness) {
+  candidates_ << timestamp_ns << ',' << sharpness << ',' << motion_.last_shift()
+              << ',' << motion_.last_residual() << '\n';
   candidates_.flush();
 }
 
@@ -218,23 +165,11 @@ void SessionRecorder::WriteFrame(PendingFrame& frame) {
     return;
   }
 
-  const CameraPose& pose = frame.pose();
-  const CameraIntrinsics& intrinsics = frame.intrinsics();
-
-  poses_ << frame.timestamp_ns() << ',' << pose.translation[0] << ','
-         << pose.translation[1] << ',' << pose.translation[2] << ','
-         << pose.rotation[0] << ',' << pose.rotation[1] << ','
-         << pose.rotation[2] << ',' << pose.rotation[3] << ','
-         << intrinsics.focal_x << ',' << intrinsics.focal_y << ','
-         << intrinsics.principal_x << ',' << intrinsics.principal_y << ','
-         << intrinsics.image_width << ',' << intrinsics.image_height << '\n';
-
   ++written_frames_;
 
   // Flushed per frame rather than at Stop(). A session that ends by the process
   // being killed — which is how a backgrounded capture usually ends — would
-  // otherwise leave the images on disk with empty CSVs describing them.
-  poses_.flush();
+  // otherwise leave the images on disk with an empty index describing them.
   frames_.flush();
 }
 
@@ -271,7 +206,6 @@ void SessionRecorder::Stop() {
   // Before the streams close: the writer thread is what writes to them.
   writer_.Stop();
 
-  poses_.close();
   frames_.close();
   imu_.close();
   candidates_.close();
@@ -289,7 +223,6 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
            << "  \"written_frames\": " << written_frames_.load() << ",\n"
            << "  \"considered_frames\": " << considered_frames_ << ",\n"
-           << "  \"untracked_frames\": " << untracked_frames_ << ",\n"
            << "  \"frames_without_image\": " << frames_without_image_.load()
            << ",\n"
            << "  \"dropped_frames\": " << writer_.dropped() << ",\n"
@@ -298,8 +231,8 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
               "same clock as the frame timestamps\",\n"
            << "  \"sharpness_metric\": \"variance of Laplacian on luma, "
               "subsampled; comparable only between frames of the same scene\",\n"
-           << "  \"pose_convention\": \"ARCore world, right-handed, "
-              "quaternion (x,y,z,w)\"\n"
+           << "  \"selection\": \"sharpest frame of each stretch; a stretch "
+              "ends when the picture shifts or stops matching\"\n"
            << "}\n";
 }
 

@@ -4,13 +4,13 @@
 #include <cstdint>
 #include <vector>
 
-#include "ar_session.h"
+#include "camera_image.h"
 
 namespace sensor_logger {
 
 // A candidate frame held while sharper ones are still possible.
 //
-// ARCore releases each frame's image on the next update, so a frame that is not
+// The camera reclaims each image when the next is taken, so a frame that is not
 // written immediately has to be copied out. Only one candidate is held at a
 // time — the sharpest seen since the last write — which bounds the cost to a
 // single frame's worth of memory and one copy each time the leader changes.
@@ -29,8 +29,6 @@ class PendingFrame {
   float sharpness() const { return sharpness_; }
 
   int64_t timestamp_ns() const { return timestamp_ns_; }
-  const CameraPose& pose() const { return pose_; }
-  const CameraIntrinsics& intrinsics() const { return intrinsics_; }
 
   int32_t width() const { return width_; }
   int32_t height() const { return height_; }
@@ -52,8 +50,6 @@ class PendingFrame {
   float sharpness_ = 0.0f;
 
   int64_t timestamp_ns_ = 0;
-  CameraPose pose_{};
-  CameraIntrinsics intrinsics_{};
 
   int32_t width_ = 0;
   int32_t height_ = 0;

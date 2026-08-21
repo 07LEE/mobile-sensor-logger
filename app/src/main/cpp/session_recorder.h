@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
-#include "ar_session.h"
+#include "camera_image.h"
+#include "frame_motion.h"
 #include "frame_writer.h"
 #include "imu_source.h"
-#include "keyframe_selector.h"
 #include "pending_frame.h"
 
 namespace sensor_logger {
@@ -18,39 +18,37 @@ namespace sensor_logger {
 // Writes one capture session to disk.
 //
 // Layout under <root>/<session_id>/:
-//   poses.csv        one row per written frame
-//   frames.csv       image dimensions, plane strides, and sharpness per frame
+//   frames.csv       dimensions, plane strides and sharpness per written frame
 //   imu.csv          accelerometer and gyroscope readings
-//   candidates.csv   pose and sharpness of every frame that was scored
+//   candidates.csv   sharpness and motion of every frame that was scored
 //   frames/          one raw YUV_420_888 file per written frame
 //
-// candidates.csv is what makes the discarding reviewable. Selection throws away
-// most of what the camera produced — thirty-odd images kept out of a couple of
-// thousand scored — on thresholds that were guessed rather than measured. The
-// images are gone, but a row per scored frame costs about a hundred bytes, so
-// the pose, the sharpness, and how far away the scene was all survive. What a
-// different threshold would have chosen can then be worked out from a capture
-// already taken, instead of from another trip to the same place.
+// No poses. The device records what a reconstruction is computed from and
+// leaves the computing to a workstation, which has the compute for a global
+// optimisation and can be re-run against the same capture as many times as the
+// result needs.
 //
 // Sharpness drives which frames survive. Handheld capture produces defocused
 // and motion-smeared frames continuously, and which ones are bad cannot be
-// predicted from the pose, so every tracked frame is scored and the sharpest of
-// each stretch of movement is the one written. Keeping every frame is the other
-// way to be sure of getting a sharp one, but a frame is megabytes at capture
-// resolution and the camera produces thirty a second, so the disk runs out long
-// before a useful capture is finished.
+// predicted from anything but the picture, so every frame is scored and the
+// sharpest of each stretch of movement is the one written. Keeping every frame
+// is the other way to be sure of getting a sharp one, but a frame is megabytes
+// at capture resolution and the camera produces thirty a second, so the disk
+// runs out long before a useful capture is finished.
 //
-// A stretch ends when the camera has moved far enough that the next viewpoint
-// is worth having, which KeyframeSelector decides.
+// A stretch ends when the picture has changed enough to be worth another frame,
+// which FrameMotion decides.
 //
-// Images are written as the planes ARCore hands over, without conversion: there
+// candidates.csv is what makes the discarding reviewable. Selection throws away
+// most of what the camera produced, on thresholds that were guessed rather than
+// measured. The images are gone, but a row per scored frame costs about fifty
+// bytes, so what a different threshold would have chosen can be worked out from
+// a capture already taken instead of from another trip to the same place.
+//
+// Images are written as the camera hands them over, without conversion: there
 // is no JPEG encoder in the NDK, and converting on the phone would spend the
 // capture's frame budget on work the workstation can do later. The strides in
 // frames.csv are what makes the files decodable.
-//
-// Frames that arrive while tracking is lost are dropped rather than written
-// with a stale pose, and every category is counted so a session can be judged
-// after the fact.
 class SessionRecorder {
  public:
   SessionRecorder() = default;
@@ -76,28 +74,23 @@ class SessionRecorder {
 
   bool is_recording() const { return recording_; }
   int64_t written_frames() const { return written_frames_; }
-  int64_t dropped_frames() const { return writer_.dropped(); }
   int64_t considered_frames() const { return considered_frames_; }
-  int64_t untracked_frames() const { return untracked_frames_; }
   int64_t frames_without_image() const { return frames_without_image_; }
+  int64_t dropped_frames() const { return writer_.dropped(); }
   int64_t imu_samples() const { return imu_samples_; }
-
-  // How far away the scene was on the last scored frame, and the sideways
-  // movement that currently closes a stretch. Both are on screen during a
-  // capture: the second is how far to move for the next viewpoint, and it is
-  // not a fixed number any more.
-  float scene_distance_m() const { return scene_distance_m_; }
-  float translation_threshold_m() const {
-    return selector_.translation_threshold_m();
-  }
   const std::string& session_path() const { return session_path_; }
 
+  // How far the picture slid since the last written frame, and how much of it
+  // no offset lines up. Between them they are the only signal the device has
+  // that a capture is covering new ground.
+  float last_shift() const { return motion_.last_shift(); }
+  float last_residual() const { return motion_.last_residual(); }
+
  private:
-  void WriteCandidate(const FrameData& frame, float sharpness,
-                     float scene_distance_m);
+  void WriteCandidate(int64_t timestamp_ns, float sharpness);
   void FlushPending();
 
-  // Both run on the writer thread. Nothing else touches poses_, frames_,
+  // Both run on the writer thread. Nothing else touches frames_,
   // written_frames_ or frames_without_image_ while it is running, which is what
   // keeps them free of locking.
   void WriteFrame(PendingFrame& frame);
@@ -107,16 +100,11 @@ class SessionRecorder {
 
   bool recording_ = false;
   std::string session_path_;
-  std::ofstream poses_;
   std::ofstream frames_;
   std::ofstream imu_;
   std::ofstream candidates_;
 
-  // Reused by the median distance calculation so it does not allocate on every
-  // frame the camera produces.
-  std::vector<float> distance_scratch_;
-
-  KeyframeSelector selector_;
+  FrameMotion motion_;
   PendingFrame pending_;
   FrameWriter writer_;
 
@@ -125,9 +113,7 @@ class SessionRecorder {
   std::atomic<int64_t> written_frames_{0};
   std::atomic<int64_t> frames_without_image_{0};
   int64_t considered_frames_ = 0;
-  int64_t untracked_frames_ = 0;
   int64_t imu_samples_ = 0;
-  float scene_distance_m_ = 0.0f;
 };
 
 }  // namespace sensor_logger

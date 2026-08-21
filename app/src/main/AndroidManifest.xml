@@ -3,17 +3,14 @@
 
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <!-- ARCore ships arm64/armv7 only and needs OpenGL ES 3.0. -->
-    <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
+    <!-- The capture path is the camera; the preview needs OpenGL ES 3.0. -->
+    <uses-feature android:name="android.hardware.camera.any" android:required="true" />
     <uses-feature android:glEsVersion="0x00030000" android:required="true" />
 
     <application
         android:label="Sensor Logger"
         android:hasCode="true"
         android:allowBackup="false">
-
-        <!-- Marks the app as requiring ARCore, so Play installs it alongside. -->
-        <meta-data android:name="com.google.ar.core" android:value="required" />
 
         <activity
             android:name="com.google.androidgamesdk.GameActivity"
