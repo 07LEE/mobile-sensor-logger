@@ -446,16 +446,17 @@ bool CameraSource::StartSession() {
 }
 
 const char* CameraSource::LensName() const {
-  if (info_.focal_length_mm <= 0.0f) return "LENS";
-  if (info_.focal_length_mm <= shortest_focal_mm_) return "ULTRAWIDE";
+  if (info_.focal_length_mm <= 0.0f) return "CAMERA";
 
-  // Only worth calling one of them a telephoto when there is something in
-  // between. With two rear cameras the longer one is the main lens, whatever
-  // the ratio between them says.
-  if (rear_ids_.size() >= 3 && info_.focal_length_mm >= longest_focal_mm_) {
-    return "TELE";
-  }
-  return "WIDE";
+  // With one rear camera there is nothing to be wide or narrow relative to.
+  // Calling it ultra-wide because it happens to be the shortest focal length
+  // present would be a lie on most phones.
+  if (rear_ids_.size() < 2 || shortest_focal_mm_ <= 0.0f) return "CAMERA";
+
+  const float ratio = info_.focal_length_mm / shortest_focal_mm_;
+  if (ratio < 1.5f) return "ULTRAWIDE";
+  if (ratio < 3.0f) return "WIDE";
+  return "TELE";
 }
 
 std::string CameraSource::NextRearCameraId(const std::string& id) const {

@@ -1,6 +1,7 @@
 #include "session_recorder.h"
 
 #include <sys/stat.h>
+#include <sys/system_properties.h>
 
 #include <cinttypes>
 #include <cstdio>
@@ -14,6 +15,33 @@ namespace {
 // Every 4th pixel on both axes. Blur is a low-frequency effect, so the estimate
 // survives subsampling, and this has to run on every frame the camera produces.
 constexpr int32_t kSharpnessStep = 4;
+
+// A system property, or empty when the platform will not say.
+//
+// Read straight from the property store rather than through android.os.Build
+// over JNI: the values are the same and this needs no Java at all.
+std::string SystemProperty(const char* name) {
+  char value[PROP_VALUE_MAX] = {};
+  const int length = __system_property_get(name, value);
+  return length > 0 ? std::string(value, static_cast<size_t>(length))
+                    : std::string();
+}
+
+// JSON string contents. Model names are vendor strings and there is no promise
+// about what is in them.
+std::string Escaped(const std::string& text) {
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    if (c == '"' || c == '\\') {
+      out += '\\';
+      out += c;
+    } else if (static_cast<unsigned char>(c) >= 0x20) {
+      out += c;
+    }
+  }
+  return out;
+}
 
 bool MakeDirectory(const std::string& path) {
   if (mkdir(path.c_str(), 0755) == 0) return true;
@@ -238,7 +266,17 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
                          std::ios::out | std::ios::trunc);
   if (!manifest.is_open()) return;
 
+  // Which phone this came from. Every measurement in a session is a property of
+  // its camera and its sensors, and the format assumptions along with them, so
+  // a capture that does not say what took it cannot be checked against another.
   manifest << "{\n"
+           << "  \"device\": \""
+           << Escaped(SystemProperty("ro.product.manufacturer")) << " "
+           << Escaped(SystemProperty("ro.product.model")) << "\",\n"
+           << "  \"android_release\": \""
+           << Escaped(SystemProperty("ro.build.version.release")) << "\",\n"
+           << "  \"android_sdk\": "
+           << SystemProperty("ro.build.version.sdk") << ",\n"
            << "  \"start_timestamp_ns\": " << start_timestamp_ns_ << ",\n"
            << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
            << "  \"written_frames\": " << written_frames_.load() << ",\n"

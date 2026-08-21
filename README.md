@@ -24,7 +24,7 @@ One directory per session under `<external files>/sessions/`:
 | `frames.csv` | `timestamp_ns, filename, width, height, sharpness, chroma_layout, luma_row_stride, chroma_row_stride, chroma_pixel_stride, segment0_length, segment1_length, segment2_length` |
 | `imu.csv` | `timestamp_ns, sensor, x, y, z` — `sensor` is `accel` or `gyro` |
 | `candidates.csv` | `timestamp_ns, sharpness, shift, residual` — one row per frame scored, kept or not |
-| `session.json` | Counts, units, and which camera the session came from |
+| `session.json` | Which phone and camera it came from, counts, and units |
 
 Timestamps are nanoseconds, taken from the image rather than read on arrival, and
 they are the key joining every file. `candidates.csv` joins to `frames.csv` on
@@ -54,7 +54,12 @@ Frames are written as the sensor reads them, which is not upright.
 `sensor_orientation` in `session.json` is how many degrees clockwise to rotate
 them — 90 on a Galaxy S25 Ultra.
 
-`session.json` also carries `camera_id`, `focal_length_mm`, `aperture` and
+`session.json` opens with `device`, `android_release` and `android_sdk`. Every
+measurement in a session is a property of the camera and the sensors that took
+it, and so are the format assumptions, so a capture that does not say what took
+it cannot be checked against another.
+
+It also carries `camera_id`, `focal_length_mm`, `aperture` and
 `sensor_size_mm`. Frames from different lenses cannot be solved as one camera —
 an ultra-wide and a periscope disagree about focal length by a factor of
 eight — so this is what says which one a session is.
@@ -218,7 +223,8 @@ than during one.
 **Volume up** puts the camera on screen, filling it, with the numbers shrunk to
 a strip along the top. Volume up again takes it away.
 
-The button changes lens. It is the only thing a touch does, and it is refused
+The button changes lens, and is only drawn where there is more than one rear
+camera to change between. It is the only thing a touch does, and it is refused
 while recording, so the rule that nothing behind a touch can lose a capture
 still holds. Touches count on release rather than on press, so a finger that
 lands and slides off is not a tap.

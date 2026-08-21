@@ -69,7 +69,15 @@ class CameraSource {
   // What to call the lens in use, relative to the others this device offers.
   // A focal length in millimetres says nothing to someone holding the phone;
   // which of its lenses is pointing at the room does.
+  //
+  // Named by ratio to the widest rather than by absolute focal length, since
+  // what counts as wide depends entirely on the sensor behind it.
   const char* LensName() const;
+
+  // How many rear cameras this device offers the app. One means there is
+  // nothing to switch between, which is not an error but does mean the control
+  // for it should not exist.
+  size_t rear_camera_count() const { return rear_ids_.size(); }
 
   int32_t capture_width() const { return capture_width_; }
   int32_t capture_height() const { return capture_height_; }

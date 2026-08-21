@@ -302,6 +302,8 @@ void ToggleRecording(AppState* state) {
 // against a coat is a trip wasted. Stopping first makes it deliberate: down to
 // stop, up to change, down to start again.
 void NextLens(AppState* state) {
+  if (state->camera.rear_camera_count() < 2) return;
+
   if (state->recorder.is_recording()) {
     LogInfo("not changing lens while recording; stop first");
     return;
@@ -546,6 +548,11 @@ extern "C" void android_main(android_app* app) {
 
     // With the picture up it fills the screen and the numbers shrink to a strip
     // over it. Without, they are the whole screen and can be twice the size.
+    // Drawn only where there is something to switch to. A control that cannot
+    // do anything is worse than no control: it invites a press and then does
+    // nothing visible, which reads as the app being broken.
+    const bool lens_choice = state.camera.rear_camera_count() > 1;
+
     char lens_label[32];
     std::snprintf(lens_label, sizeof(lens_label), "%s %.1FMM - TAP",
                   state.camera.LensName(), state.camera.info().focal_length_mm);
@@ -556,22 +563,26 @@ extern "C" void android_main(android_app* app) {
       state.preview.DrawCamera(state.camera.sensor_orientation(), 1.0f);
       state.preview.DrawStatus(StatusLines(state),
                                state.recorder.is_recording(), 0.0f, 40);
-      state.preview.DrawButton(lens_label, 0.86f,
-                               !state.recorder.is_recording());
+      if (lens_choice) {
+        state.preview.DrawButton(lens_label, 0.86f,
+                                 !state.recorder.is_recording());
+      }
     } else {
       // Nothing else on the screen, so the block sits in the middle of it
       // rather than pinned to the top edge with a screen of black underneath.
       constexpr int kColumns = 32;
       constexpr float kGap = 0.03f;
       const float button_height = 0.035f;
-      const float block =
-          state.preview.StatusHeightFraction(kColumns) + kGap + button_height;
+      const float block = state.preview.StatusHeightFraction(kColumns) +
+                          (lens_choice ? kGap + button_height : 0.0f);
       const float top = (1.0f - block) * 0.5f;
 
       const float bottom = state.preview.DrawStatus(
           StatusLines(state), state.recorder.is_recording(), top, kColumns);
-      state.preview.DrawButton(lens_label, bottom + kGap,
-                               !state.recorder.is_recording());
+      if (lens_choice) {
+        state.preview.DrawButton(lens_label, bottom + kGap,
+                                 !state.recorder.is_recording());
+      }
     }
 
     eglSwapBuffers(state.display, state.surface);
