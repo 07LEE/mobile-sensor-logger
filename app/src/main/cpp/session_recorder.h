@@ -80,6 +80,16 @@ class SessionRecorder {
   int64_t frames_without_image() const { return frames_without_image_; }
   int64_t dropped_frames() const { return writer_.dropped(); }
   int64_t imu_samples() const { return imu_samples_; }
+
+  // Bytes of image written, and how long the session has been running by the
+  // camera's clock. Between them they say how fast the disk is filling, which
+  // is the number that decides how long a capture can go on.
+  int64_t written_bytes() const { return written_bytes_; }
+  int64_t elapsed_ns() const {
+    return last_timestamp_ns_ > start_timestamp_ns_
+               ? last_timestamp_ns_ - start_timestamp_ns_
+               : 0;
+  }
   const std::string& session_path() const { return session_path_; }
 
   // How far the picture slid since the last written frame, and how much of it
@@ -115,6 +125,7 @@ class SessionRecorder {
   Retention retention_ = Retention::kSharpest;
   int64_t last_timestamp_ns_ = 0;
   std::atomic<int64_t> written_frames_{0};
+  std::atomic<int64_t> written_bytes_{0};
   std::atomic<int64_t> frames_without_image_{0};
   int64_t considered_frames_ = 0;
   int64_t imu_samples_ = 0;

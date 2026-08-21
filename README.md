@@ -126,8 +126,9 @@ it takes the largest and says so in the log.
 
 ## Running out of room
 
-A frame at full resolution is around 19MB, and a session writes roughly two a
-second, so plan on **2GB per minute**.
+A frame at full resolution is around 19MB, and a session writes two or three a
+second, so plan on **2 to 3GB per minute**. The readout carries the measured
+rate and what is left at it.
 
 `dropped_frames` in `session.json` counts frames the writer could not keep up
 with. **It should be zero.** A run of drops means the capture is asking for more
@@ -139,15 +140,21 @@ until the device is full.
 The camera image with a readout over it:
 
 ```
-RECORDING  47 KEPT / 401 SEEN
-CAPTURE 4080X3060
-SHIFT 10%  DIFF 6%
-IMU 12593 SAMPLES
+REC 0:57   153 KEPT / 1696 SEEN
+4080X3060  6.3MM  KEEP SHARPEST
+SHIFT 2%  DIFF 4%   IMU 36651
+SESSION 2.9GB   FREE 111.0GB
+ROOM FOR 36 MIN AT THIS RATE
 DROPPED 0  NO IMAGE 0
 ```
 
-`SHIFT` and `DIFF` are the two thresholds above, as percentages. A red marker in
-the corner means recording.
+`SHIFT` and `DIFF` are the two selection thresholds, as percentages. A red marker
+in the corner means recording.
+
+`ROOM FOR` is the free space divided by the rate this capture is actually
+filling it. That rate depends on the resolution, on how much of the scene is
+moving, and on how many frames survive selection, so a figure worked out
+beforehand would be wrong for the capture in hand.
 
 ## Building
 

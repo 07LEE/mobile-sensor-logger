@@ -4,6 +4,8 @@
 #include <game-activity/GameActivity.h>
 #include <game-activity/native_app_glue/android_native_app_glue.h>
 
+#include <sys/statvfs.h>
+
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -55,6 +57,12 @@ struct AppState {
   SessionRecorder recorder;
   CaptureConfig config;
   bool capturing = false;
+
+  // Free space, refreshed on a timer rather than per frame: statvfs on the
+  // shared storage is a round trip through the filesystem daemon, and the
+  // number moves slowly enough that a couple of seconds stale is honest.
+  int64_t free_bytes = 0;
+  int free_space_countdown = 0;
   bool permission_granted = false;
 };
 
@@ -207,6 +215,26 @@ void StopCapture(AppState* state) {
   state->capturing = false;
 }
 
+int64_t FreeBytes(const std::string& path) {
+  struct statvfs stats{};
+  if (statvfs(path.c_str(), &stats) != 0) return 0;
+  return static_cast<int64_t>(stats.f_bavail) * stats.f_frsize;
+}
+
+// Bytes as something readable at arm's length. Two significant figures is as
+// much as anyone acts on.
+std::string Bytes(int64_t bytes) {
+  char buffer[32];
+  if (bytes >= 1000LL * 1000 * 1000) {
+    std::snprintf(buffer, sizeof(buffer), "%.1FGB",
+                  static_cast<double>(bytes) / (1000.0 * 1000 * 1000));
+  } else {
+    std::snprintf(buffer, sizeof(buffer), "%lldMB",
+                  static_cast<long long>(bytes / (1000 * 1000)));
+  }
+  return buffer;
+}
+
 // The readout drawn over the preview.
 //
 // These are the numbers that decide whether a capture is worth keeping, and
@@ -217,8 +245,10 @@ std::vector<std::string> StatusLines(const AppState& state) {
   char buffer[64];
   std::vector<std::string> lines;
 
+  const int64_t elapsed_s = recorder.elapsed_ns() / 1000000000;
   if (recorder.is_recording()) {
-    std::snprintf(buffer, sizeof(buffer), "RECORDING  %lld KEPT / %lld SEEN",
+    std::snprintf(buffer, sizeof(buffer), "REC %lld:%02lld  %lld KEPT / %lld SEEN",
+                  (long long)(elapsed_s / 60), (long long)(elapsed_s % 60),
                   (long long)recorder.written_frames(),
                   (long long)recorder.considered_frames());
   } else {
@@ -234,13 +264,31 @@ std::vector<std::string> StatusLines(const AppState& state) {
 
   // Movement since the last kept frame. Nothing else on the device says whether
   // the capture is covering new ground, now that there is no pose to ask.
-  std::snprintf(buffer, sizeof(buffer), "SHIFT %.0F%%  DIFF %.0F%%",
+  std::snprintf(buffer, sizeof(buffer), "SHIFT %.0F%%  DIFF %.0F%%  IMU %lld",
                 recorder.last_shift() * 100.0f,
-                recorder.last_residual() * 100.0f);
+                recorder.last_residual() * 100.0f,
+                (long long)recorder.imu_samples());
   lines.emplace_back(buffer);
 
-  std::snprintf(buffer, sizeof(buffer), "IMU %lld SAMPLES",
-                (long long)recorder.imu_samples());
+  std::snprintf(buffer, sizeof(buffer), "SESSION %s   FREE %s",
+                Bytes(recorder.written_bytes()).c_str(),
+                Bytes(state.free_bytes).c_str());
+  lines.emplace_back(buffer);
+
+  // How long the free space lasts at the rate this capture is actually filling
+  // it. The rate depends on resolution, on how much of the scene is moving and
+  // on which frames survive selection, so a figure worked out beforehand would
+  // be wrong; this one is measured.
+  if (elapsed_s > 2 && recorder.written_bytes() > 0) {
+    const double per_second =
+        static_cast<double>(recorder.written_bytes()) / elapsed_s;
+    const long long minutes =
+        static_cast<long long>(state.free_bytes / per_second / 60.0);
+    std::snprintf(buffer, sizeof(buffer), "ROOM FOR %lld MIN AT THIS RATE",
+                  minutes);
+  } else {
+    std::snprintf(buffer, sizeof(buffer), "MEASURING THE RATE");
+  }
   lines.emplace_back(buffer);
 
   // Anything but zero here means the capture is outrunning the disk, which
@@ -357,6 +405,12 @@ extern "C" void android_main(android_app* app) {
       }
 
       state.recorder.Record(frame);
+    }
+
+    // Every couple of seconds at camera rate.
+    if (--state.free_space_countdown <= 0) {
+      state.free_bytes = FreeBytes(SessionRoot(app));
+      state.free_space_countdown = 60;
     }
 
     if (state.display == EGL_NO_DISPLAY) continue;

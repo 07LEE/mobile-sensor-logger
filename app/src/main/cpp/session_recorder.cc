@@ -90,6 +90,7 @@ bool SessionRecorder::Start(const std::string& root,
   retention_ = retention;
   last_timestamp_ns_ = start_timestamp_ns;
   written_frames_ = 0;
+  written_bytes_ = 0;
   considered_frames_ = 0;
   frames_without_image_ = 0;
   imu_samples_ = 0;
@@ -182,6 +183,7 @@ void SessionRecorder::WriteFrame(PendingFrame& frame) {
   }
 
   ++written_frames_;
+  written_bytes_ += static_cast<int64_t>(frame.pixels().size());
 
   // Flushed per frame rather than at Stop(). A session that ends by the process
   // being killed — which is how a backgrounded capture usually ends — would
@@ -238,6 +240,7 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"start_timestamp_ns\": " << start_timestamp_ns_ << ",\n"
            << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
            << "  \"written_frames\": " << written_frames_.load() << ",\n"
+           << "  \"written_bytes\": " << written_bytes_.load() << ",\n"
            << "  \"considered_frames\": " << considered_frames_ << ",\n"
            << "  \"frames_without_image\": " << frames_without_image_.load()
            << ",\n"
