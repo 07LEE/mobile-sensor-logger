@@ -335,7 +335,8 @@ extern "C" void android_main(android_app* app) {
       // start it from, and GameActivity is not delivering touch events to the
       // native buffer, so waiting for a tap would mean capturing nothing.
       if (!state.recorder.is_recording()) {
-        if (state.recorder.Start(SessionRoot(app), frame.timestamp_ns)) {
+        if (state.recorder.Start(SessionRoot(app), frame.timestamp_ns,
+                                 state.camera.sensor_orientation())) {
           __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
                               state.recorder.session_path().c_str());
         } else {

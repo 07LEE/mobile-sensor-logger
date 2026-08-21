@@ -55,7 +55,8 @@ const char* ChromaLayoutName(ChromaLayout layout) {
 SessionRecorder::~SessionRecorder() { Stop(); }
 
 bool SessionRecorder::Start(const std::string& root,
-                            int64_t start_timestamp_ns) {
+                            int64_t start_timestamp_ns,
+                            int32_t sensor_orientation) {
   if (recording_) return false;
   if (!MakeDirectory(root)) return false;
 
@@ -85,6 +86,7 @@ bool SessionRecorder::Start(const std::string& root,
   writer_.Start([this](PendingFrame& frame) { WriteFrame(frame); });
 
   start_timestamp_ns_ = start_timestamp_ns;
+  sensor_orientation_ = sensor_orientation;
   last_timestamp_ns_ = start_timestamp_ns;
   written_frames_ = 0;
   considered_frames_ = 0;
@@ -227,6 +229,10 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << ",\n"
            << "  \"dropped_frames\": " << writer_.dropped() << ",\n"
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
+           << "  \"sensor_orientation\": " << sensor_orientation_ << ",\n"
+           << "  \"sensor_orientation_note\": \"degrees clockwise the frames "
+              "must be rotated to appear upright; they are written as the "
+              "sensor reads them\",\n"
            << "  \"imu_note\": \"m/s^2 and rad/s in the device frame, on the "
               "same clock as the frame timestamps\",\n"
            << "  \"sharpness_metric\": \"variance of Laplacian on luma, "

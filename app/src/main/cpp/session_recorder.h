@@ -58,7 +58,8 @@ class SessionRecorder {
   SessionRecorder& operator=(const SessionRecorder&) = delete;
 
   // Creates the session directory under `root` and opens the log files.
-  bool Start(const std::string& root, int64_t start_timestamp_ns);
+  bool Start(const std::string& root, int64_t start_timestamp_ns,
+             int32_t sensor_orientation);
 
   // Offers a frame. Scored and buffered; written only if it ends up the
   // sharpest of its stretch.
@@ -109,6 +110,7 @@ class SessionRecorder {
   FrameWriter writer_;
 
   int64_t start_timestamp_ns_ = 0;
+  int32_t sensor_orientation_ = 0;
   int64_t last_timestamp_ns_ = 0;
   std::atomic<int64_t> written_frames_{0};
   std::atomic<int64_t> frames_without_image_{0};

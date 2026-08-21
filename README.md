@@ -50,6 +50,10 @@ The file is the segments listed in `frames.csv`, concatenated:
 **Row strides are not the same as `width`.** On a Galaxy S25 Ultra a 4080-wide
 frame has a 4096-byte row stride, so 16 bytes of every row are padding.
 
+Frames are written as the sensor reads them, which is not upright.
+`sensor_orientation` in `session.json` is how many degrees clockwise to rotate
+them — 90 on a Galaxy S25 Ultra.
+
 ### Inertial data
 
 Accelerometer and gyroscope at a requested 200Hz, unfiltered, one row per
