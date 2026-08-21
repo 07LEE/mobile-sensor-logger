@@ -267,6 +267,17 @@ bool CameraSource::SelectCamera(const CaptureConfig& config) {
   ACameraManager_deleteCameraIdList(ids);
   if (back.empty()) return false;
 
+  shortest_focal_mm_ = back.front().info.focal_length_mm;
+  longest_focal_mm_ = back.front().info.focal_length_mm;
+  for (const Candidate& candidate : back) {
+    const float focal = candidate.info.focal_length_mm;
+    if (focal <= 0.0f) continue;
+    if (shortest_focal_mm_ <= 0.0f || focal < shortest_focal_mm_) {
+      shortest_focal_mm_ = focal;
+    }
+    if (focal > longest_focal_mm_) longest_focal_mm_ = focal;
+  }
+
   const Candidate* chosen = &back.front();
 
   if (config.lens == Lens::kUltrawide) {
@@ -434,6 +445,19 @@ bool CameraSource::StartSession() {
          ACAMERA_OK;
 }
 
+const char* CameraSource::LensName() const {
+  if (info_.focal_length_mm <= 0.0f) return "LENS";
+  if (info_.focal_length_mm <= shortest_focal_mm_) return "ULTRAWIDE";
+
+  // Only worth calling one of them a telephoto when there is something in
+  // between. With two rear cameras the longer one is the main lens, whatever
+  // the ratio between them says.
+  if (rear_ids_.size() >= 3 && info_.focal_length_mm >= longest_focal_mm_) {
+    return "TELE";
+  }
+  return "WIDE";
+}
+
 std::string CameraSource::NextRearCameraId(const std::string& id) const {
   if (rear_ids_.empty()) return id;
 
@@ -574,6 +598,17 @@ bool CameraSource::AcquireFrame(FrameData* out) {
   *out = FrameData{};
   if (AImage_getTimestamp(image, &out->timestamp_ns) != AMEDIA_OK) return false;
   return ReadImage(image, &out->image);
+}
+
+void CameraSource::DrainPreview() {
+  if (preview_reader_ == nullptr) return;
+
+  AImage* image = nullptr;
+  if (AImageReader_acquireLatestImage(preview_reader_, &image) != AMEDIA_OK ||
+      image == nullptr) {
+    return;
+  }
+  AImage_delete(image);
 }
 
 bool CameraSource::AcquirePreviewFrame(CameraImageView* out) {

@@ -194,31 +194,39 @@ anyway. Sessions are never deleted; clearing them is a manual job.
 
 ## On screen
 
-The picture is small and the numbers get the room:
+The camera is not drawn unless asked for. The numbers are what the screen is for
+during a capture; the picture is for aiming, which happens between captures more
+than during one.
 
 ```
      +--------------------------+
      |                          |
-     |     the camera, small    |  <- tap to swap
      |                          |
-     | REC 0:57    36 MIN LEFT  |
-     | 153 KEPT / 1696 SEEN     |
-     | 2.9GB USED  111.0GB FREE |
-     | SHIFT 2/12  DIFF 4/6     |
-     | 4080X3060 2.2MM SHARP    |
-     | DROP 0 NOIMG 0 IMU 36K   |
+     |  REC 0:57   36 MIN LEFT  |
+     |  153 KEPT / 1696 SEEN    |
+     |  2.9GB USED 111.0GB FREE |
+     |  SHIFT 2/12  DIFF 4/6    |
+     |  4080X3060 ULTRAWIDE ALL |
+     |  DROP 0 NOIMG 0 IMU 36K  |
      |                          |
-     |          black           |
+     |  [ ULTRAWIDE 2.2MM-TAP ] |
+     |                          |
+     |                          |
      +--------------------------+
 ```
 
-A tap **on the picture** swaps the two: the camera fills the screen and the
-numbers shrink to a strip over it. Nothing that could lose a capture sits behind
-a touch, so a palm across the screen costs nothing.
+**Volume up** puts the camera on screen, filling it, with the numbers shrunk to
+a strip along the top. Volume up again takes it away.
 
-Leaving most of the panel black is not only a layout choice — on OLED those
-pixels are switched off, and the screen is the second largest draw on the
-battery after the camera itself.
+The button changes lens. It is the only thing a touch does, and it is refused
+while recording, so the rule that nothing behind a touch can lose a capture
+still holds. Touches count on release rather than on press, so a finger that
+lands and slides off is not a tap.
+
+Not drawing the camera also skips uploading a frame as two textures every frame,
+which was what capped the frame rate, and leaves nearly the whole OLED panel
+switched off — the screen is the second largest draw on the battery after the
+camera itself.
 
 `SHIFT` and `DIFF` are the two selection thresholds, as percentages. A red marker
 in the corner means recording.

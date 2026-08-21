@@ -74,10 +74,14 @@ struct AppState {
   // than in a log read afterwards.
   const char* stop_reason = nullptr;
 
-  // The picture is small by default and the numbers are what the screen is
-  // mostly for; a tap on the picture trades that round. Small also leaves most
-  // of an OLED panel switched off, which is where the power goes.
-  bool preview_expanded = false;
+  // The picture is not drawn at all unless asked for.
+  //
+  // The numbers are what the screen is for during a capture; the picture is for
+  // aiming, which is a thing done between captures more than during one. Not
+  // drawing it also skips uploading a frame as two textures every frame, which
+  // is what was capping the frame rate, and leaves nearly the whole OLED panel
+  // switched off.
+  bool preview_visible = false;
   bool permission_granted = false;
 };
 
@@ -378,9 +382,9 @@ std::vector<std::string> StatusLines(const AppState& state) {
                 state.config.min_residual * 100.0f);
   lines.emplace_back(buffer);
 
-  std::snprintf(buffer, sizeof(buffer), "%dX%d %.1FMM %s",
+  std::snprintf(buffer, sizeof(buffer), "%dX%d %s %s",
                 state.camera.capture_width(), state.camera.capture_height(),
-                state.camera.info().focal_length_mm,
+                state.camera.LensName(),
                 state.config.retention == Retention::kAll ? "ALL" : "SHARP");
   lines.emplace_back(buffer);
 
@@ -494,17 +498,18 @@ extern "C" void android_main(android_app* app) {
       case Action::kToggleRecording:
         ToggleRecording(&state);
         break;
-      case Action::kNextLens:
-        NextLens(&state);
+      case Action::kTogglePreview:
+        state.preview_visible = !state.preview_visible;
         break;
       case Action::kNone:
         break;
     }
 
-    // Only a touch on the picture itself, and it only changes how things are
-    // drawn. Nothing that could lose a capture sits behind a touch.
-    if (input.touched && state.preview.CameraRectContains(input.x, input.y)) {
-      state.preview_expanded = !state.preview_expanded;
+    // Only the button, not the screen at large. Changing lens moved to a touch
+    // when the volume keys ran out, and it is refused while recording, so the
+    // rule that nothing behind a touch can lose a capture still holds.
+    if (input.touched && state.preview.ButtonContains(input.x, input.y)) {
+      NextLens(&state);
     }
 
     // Every couple of seconds at camera rate.
@@ -528,21 +533,46 @@ extern "C" void android_main(android_app* app) {
 
     if (state.display == EGL_NO_DISPLAY) continue;
 
-    if (state.camera.AcquirePreviewFrame(&preview_image)) {
-      state.preview.UploadCamera(preview_image);
+    if (state.preview_visible) {
+      if (state.camera.AcquirePreviewFrame(&preview_image)) {
+        state.preview.UploadCamera(preview_image);
+      }
+    } else {
+      state.camera.DrainPreview();
     }
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    // Expanded: the picture fills the screen and the numbers shrink to a strip
-    // over it. Compact: a band at the top, and the numbers get the room.
-    const float picture = state.preview_expanded ? 1.0f : 0.42f;
-    const float text_top = state.preview_expanded ? 0.0f : 0.44f;
-    const int text_columns = state.preview_expanded ? 40 : 26;
 
-    state.preview.DrawCamera(state.camera.sensor_orientation(), picture);
-    state.preview.DrawStatus(StatusLines(state), state.recorder.is_recording(),
-                             text_top, text_columns);
+    // With the picture up it fills the screen and the numbers shrink to a strip
+    // over it. Without, they are the whole screen and can be twice the size.
+    char lens_label[32];
+    std::snprintf(lens_label, sizeof(lens_label), "%s %.1FMM - TAP",
+                  state.camera.LensName(), state.camera.info().focal_length_mm);
+
+    if (state.preview_visible) {
+      // Out of the way of the picture: the numbers along the top, the control
+      // near the bottom where a thumb already is.
+      state.preview.DrawCamera(state.camera.sensor_orientation(), 1.0f);
+      state.preview.DrawStatus(StatusLines(state),
+                               state.recorder.is_recording(), 0.0f, 40);
+      state.preview.DrawButton(lens_label, 0.86f,
+                               !state.recorder.is_recording());
+    } else {
+      // Nothing else on the screen, so the block sits in the middle of it
+      // rather than pinned to the top edge with a screen of black underneath.
+      constexpr int kColumns = 32;
+      constexpr float kGap = 0.03f;
+      const float button_height = 0.035f;
+      const float block =
+          state.preview.StatusHeightFraction(kColumns) + kGap + button_height;
+      const float top = (1.0f - block) * 0.5f;
+
+      const float bottom = state.preview.DrawStatus(
+          StatusLines(state), state.recorder.is_recording(), top, kColumns);
+      state.preview.DrawButton(lens_label, bottom + kGap,
+                               !state.recorder.is_recording());
+    }
 
     eglSwapBuffers(state.display, state.surface);
 

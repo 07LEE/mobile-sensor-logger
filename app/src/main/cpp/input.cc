@@ -25,7 +25,7 @@ bool AcceptEveryKey(const GameActivityKeyEvent*) { return true; }
 void Input::Attach(android_app* app) {
   android_app_set_key_event_filter(app, AcceptEveryKey);
   __android_log_print(ANDROID_LOG_INFO, kTag,
-                      "input: volume keys enabled (up: lens, down: record)");
+                      "input: volume keys enabled (up: picture, down: record)");
 }
 
 InputEvents Input::Poll(android_app* app) {
@@ -41,7 +41,7 @@ InputEvents Input::Poll(android_app* app) {
     if (event.keyCode == kKeycodeVolumeDown) {
       events.action = Action::kToggleRecording;
     } else if (event.keyCode == kKeycodeVolumeUp) {
-      events.action = Action::kNextLens;
+      events.action = Action::kTogglePreview;
     }
   }
 

@@ -423,7 +423,93 @@ void PreviewRenderer::DrawCamera(int32_t sensor_orientation,
   DrawQuad(camera_program_, -half_width, bottom, half_width, top, uvs);
 }
 
-void PreviewRenderer::RasterizeText(const std::vector<std::string>& lines) {
+bool PreviewRenderer::ButtonContains(float x, float y) const {
+  return x >= button_left_ && x <= button_right_ && y >= button_top_ &&
+         y <= button_bottom_;
+}
+
+void PreviewRenderer::DrawButton(const std::string& label, float top_fraction,
+                                 bool enabled) {
+  if (viewport_width_ <= 0 || viewport_height_ <= 0) return;
+
+  // Fixed size, and the label scaled to fit it. Deriving the size from the
+  // label instead made the button change shape when the lens did, which reads
+  // as something having gone wrong rather than as the same control.
+  //
+  // Wide and tall enough to hit with a thumb without looking, which is the
+  // whole point of it being a button rather than a line of text.
+  constexpr float kWidth = 0.56f;
+  constexpr float kLeft = (1.0f - kWidth) * 0.5f;
+  constexpr float kHeight = 0.045f;
+
+  const float button_width_px = static_cast<float>(viewport_width_) * kWidth;
+  const float height_px = static_cast<float>(viewport_height_) * kHeight;
+
+  const int columns = static_cast<int>(label.size()) + 2;
+  const float by_width =
+      button_width_px * 0.86f / static_cast<float>(columns * kCellWidth);
+  const float by_height =
+      height_px * 0.5f / static_cast<float>(kGlyphHeight);
+  const float scale = by_width < by_height ? by_width : by_height;
+
+  const float left = -1.0f + 2.0f * kLeft;
+  const float right = left + 2.0f * kWidth;
+  const float top = 1.0f - 2.0f * top_fraction;
+  const float bottom = top - 2.0f * height_px / static_cast<float>(viewport_height_);
+
+  button_left_ = kLeft * viewport_width_;
+  button_right_ = button_left_ + button_width_px;
+  button_top_ = top_fraction * viewport_height_;
+  button_bottom_ = button_top_ + height_px;
+
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  static constexpr float kFullUvs[8] = {0.0f, 1.0f, 1.0f, 1.0f,
+                                        0.0f, 0.0f, 1.0f, 0.0f};
+
+  glActiveTexture(GL_TEXTURE0);
+  glUseProgram(quad_program_);
+  glUniform1i(glGetUniformLocation(quad_program_, "u_texture"), 0);
+
+  glBindTexture(GL_TEXTURE_2D, white_texture_);
+  if (enabled) {
+    glUniform4f(quad_color_location_, 0.16f, 0.16f, 0.18f, 0.95f);
+  } else {
+    glUniform4f(quad_color_location_, 0.09f, 0.09f, 0.09f, 0.95f);
+  }
+  DrawQuad(quad_program_, left, bottom, right, top, kFullUvs);
+
+  // The label goes through the same grid as the status lines, one row of it,
+  // written after they have been drawn so the two do not fight over the
+  // texture.
+  RasterizeText({label}, columns);
+
+  const float used = static_cast<float>(columns) / kTextColumns;
+  const float row = 1.0f / kTextRows;
+  const float label_uvs[8] = {0.0f, row, used, row, 0.0f, 0.0f, used, 0.0f};
+
+  // Centred in the button, sized by whichever of width or height ran out first.
+  const float label_width =
+      2.0f * static_cast<float>(columns * kCellWidth) * scale /
+      static_cast<float>(viewport_width_);
+  const float label_height =
+      2.0f * static_cast<float>(kGlyphHeight) * scale /
+      static_cast<float>(viewport_height_);
+  const float centre_x = (left + right) * 0.5f;
+  const float label_centre = (top + bottom) * 0.5f;
+
+  glUniform4f(quad_color_location_, enabled ? 1.0f : 0.45f,
+              enabled ? 1.0f : 0.45f, enabled ? 1.0f : 0.45f, 1.0f);
+  DrawQuad(quad_program_, centre_x - label_width * 0.5f,
+           label_centre - label_height * 0.5f, centre_x + label_width * 0.5f,
+           label_centre + label_height * 0.5f, label_uvs);
+
+  glDisable(GL_BLEND);
+}
+
+void PreviewRenderer::RasterizeText(const std::vector<std::string>& lines,
+                                    int columns) {
   std::memset(text_pixels_.data(), 0, text_pixels_.size());
 
   const int rows = static_cast<int>(lines.size()) < kTextRows
@@ -432,12 +518,17 @@ void PreviewRenderer::RasterizeText(const std::vector<std::string>& lines) {
 
   for (int row = 0; row < rows; ++row) {
     const std::string& line = lines[static_cast<size_t>(row)];
-    const int columns = static_cast<int>(line.size()) < kTextColumns
-                            ? static_cast<int>(line.size())
-                            : kTextColumns;
+    const int length = static_cast<int>(line.size()) < columns
+                           ? static_cast<int>(line.size())
+                           : columns;
 
-    for (int column = 0; column < columns; ++column) {
-      const uint8_t* glyph = FindGlyph(line[static_cast<size_t>(column)]);
+    // Centred within the width being drawn, rather than run up against the
+    // left edge. Lines of different lengths otherwise read as ragged.
+    const int indent = (columns - length) / 2;
+
+    for (int i = 0; i < length; ++i) {
+      const int column = indent + i;
+      const uint8_t* glyph = FindGlyph(line[static_cast<size_t>(i)]);
       if (glyph == nullptr) continue;
 
       for (int gx = 0; gx < kGlyphWidth; ++gx) {
@@ -456,10 +547,20 @@ void PreviewRenderer::RasterizeText(const std::vector<std::string>& lines) {
                   GL_UNSIGNED_BYTE, text_pixels_.data());
 }
 
-void PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
-                                 bool recording, float top_fraction,
-                                 int columns) {
-  if (viewport_width_ <= 0 || viewport_height_ <= 0) return;
+float PreviewRenderer::StatusHeightFraction(int columns) const {
+  if (viewport_width_ <= 0 || viewport_height_ <= 0) return 0.0f;
+  if (columns < 1) columns = 1;
+
+  const float scale = static_cast<float>(viewport_width_) * 0.96f /
+                      static_cast<float>(columns * kCellWidth);
+  return static_cast<float>(kTextHeight) * scale /
+         static_cast<float>(viewport_height_);
+}
+
+float PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
+                                  bool recording, float top_fraction,
+                                  int columns) {
+  if (viewport_width_ <= 0 || viewport_height_ <= 0) return top_fraction;
   if (columns < 1) columns = 1;
   if (columns > kTextColumns) columns = kTextColumns;
 
@@ -499,7 +600,7 @@ void PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
   glUniform4f(quad_color_location_, 0.0f, 0.0f, 0.0f, 0.55f);
   DrawQuad(quad_program_, -1.0f, panel_bottom, 1.0f, panel_top, kFullUvs);
 
-  RasterizeText(lines);
+  RasterizeText(lines, columns);
   glUniform4f(quad_color_location_, 1.0f, 1.0f, 1.0f, 1.0f);
   DrawQuad(quad_program_, left, panel_bottom, right, panel_top, kFullUvs);
 
@@ -522,6 +623,8 @@ void PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
            line_bottom + marker_h, kFullUvs);
 
   glDisable(GL_BLEND);
+
+  return (1.0f - panel_bottom) * 0.5f;
 }
 
 }  // namespace sensor_logger

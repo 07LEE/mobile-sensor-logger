@@ -57,13 +57,25 @@ class PreviewRenderer {
   // Draws `lines` starting at `top_fraction` down the screen, sized so that
   // `columns` glyphs span its width — fewer columns, larger text. Plus a filled
   // marker that is red while recording and grey otherwise.
-  void DrawStatus(const std::vector<std::string>& lines, bool recording,
-                  float top_fraction, int columns);
+  // Returns where it ended, as a fraction of the screen height, so whatever
+  // goes under it does not have to guess.
+  float DrawStatus(const std::vector<std::string>& lines, bool recording,
+                   float top_fraction, int columns);
+
+  // How tall that block will be, for working out where to start it.
+  float StatusHeightFraction(int columns) const;
+
+  // Draws a labelled button at `top_fraction` down the screen and remembers
+  // where it landed. `enabled` greys it out; it is still drawn, because a
+  // control that disappears is a control nobody learns.
+  void DrawButton(const std::string& label, float top_fraction, bool enabled);
+
+  bool ButtonContains(float x, float y) const;
 
  private:
   void DrawQuad(GLuint program, float x0, float y0, float x1, float y1,
                 const float* uvs);
-  void RasterizeText(const std::vector<std::string>& lines);
+  void RasterizeText(const std::vector<std::string>& lines, int columns);
 
   GLuint camera_program_ = 0;
   GLuint quad_program_ = 0;
@@ -85,6 +97,12 @@ class PreviewRenderer {
   float camera_top_ = 0.0f;
   float camera_right_ = 0.0f;
   float camera_bottom_ = 0.0f;
+
+  // Likewise, set by the last DrawButton.
+  float button_left_ = 0.0f;
+  float button_top_ = 0.0f;
+  float button_right_ = 0.0f;
+  float button_bottom_ = 0.0f;
   std::vector<uint8_t> chroma_pixels_;
 
   int viewport_width_ = 0;

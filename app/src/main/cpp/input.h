@@ -9,7 +9,7 @@ namespace sensor_logger {
 enum class Action {
   kNone,
   kToggleRecording,
-  kNextLens,
+  kTogglePreview,
 };
 
 // One pass over the input queue.
@@ -31,6 +31,9 @@ struct InputEvents {
 // is being pointed at something: they are found by feel, they work through the
 // case, and pressing one does not move the camera the way reaching for a
 // particular part of the screen does.
+//
+// Down records, up shows the picture. Showing the picture is on a key rather
+// than the screen because there is nothing to touch while it is hidden.
 //
 // Touches come back with their position rather than as an action. What a touch
 // means depends on what is under it, and only the caller knows that. Nothing

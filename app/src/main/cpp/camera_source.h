@@ -55,11 +55,21 @@ class CameraSource {
   // screen wants the newest frame, and the recorder wants every frame.
   bool AcquirePreviewFrame(CameraImageView* out);
 
+  // Throws away whatever the preview stream has produced. Called when nothing
+  // is drawing it: the reader holds a fixed number of buffers and the camera
+  // stalls on a stream whose buffers are never given back.
+  void DrainPreview();
+
   const CameraInfo& info() const { return info_; }
 
   // The rear camera after `id` in the order the system lists them, wrapping
   // round. Survives Stop(), so switching lens does not have to enumerate again.
   std::string NextRearCameraId(const std::string& id) const;
+
+  // What to call the lens in use, relative to the others this device offers.
+  // A focal length in millimetres says nothing to someone holding the phone;
+  // which of its lenses is pointing at the room does.
+  const char* LensName() const;
 
   int32_t capture_width() const { return capture_width_; }
   int32_t capture_height() const { return capture_height_; }
@@ -82,6 +92,8 @@ class CameraSource {
 
   std::string camera_id_;
   std::vector<std::string> rear_ids_;
+  float shortest_focal_mm_ = 0.0f;
+  float longest_focal_mm_ = 0.0f;
   CameraInfo info_;
   int32_t sensor_orientation_ = 0;
 
