@@ -17,7 +17,6 @@ One directory per session under `<external files>/sessions/`:
 | `frames/<timestamp_ns>.yuv` | Raw `YUV_420_888`, luma then chroma |
 | `frames.csv` | `timestamp_ns, filename, width, height, sharpness, chroma_layout, luma_row_stride, chroma_row_stride, chroma_pixel_stride, segment0_length, segment1_length, segment2_length` |
 | `poses.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, fx, fy, cx, cy, image_width, image_height` |
-| `points.csv` | `timestamp_ns, x, y, z, confidence` |
 | `imu.csv` | `timestamp_ns, sensor, x, y, z` — `sensor` is `accel` or `gyro` |
 | `candidates.csv` | `timestamp_ns, tx, ty, tz, qx, qy, qz, qw, sharpness, point_count, median_point_distance_m, translation_threshold_m` |
 | `session.json` | Frame counts and the pose convention |
@@ -173,23 +172,21 @@ source disclosure, but they do place obligations on anything shipped: users must
 be told the app includes ARCore, and be given Google's terms and privacy policy.
 Read them before distributing a build.
 
-**The point cloud has not been reliable, and the parallax threshold rests on
-it.** Across every session captured so far, 92% of feature points came back as
-NaN, and six sessions out of sixteen produced no points at all — including the
-most recent, which wrote thirty-seven frames and one point. Where nothing
-measured the distance the threshold falls back to an assumption, which is safe
-but degenerates to a fixed step in metres again, so the readout says `ASSUMED`
-rather than printing a number that looks measured. Fixing this is what the next
-capture on a device has to establish; ARCore's depth API is the obvious
-alternative source if the sparse cloud stays this thin.
+ARCore's feature points are not written out. They are far sparser than what
+structure-from-motion recovers from the images themselves and carry no
+correspondence to them, so nothing downstream would read them; the one thing
+they are good for is estimating how far away the scene is, and that is kept as a
+single column in `candidates.csv`. Points that are not finite are dropped before
+they reach even that — captures have come back with most of the cloud as NaN,
+and since every comparison against NaN is false, one reaching the keyframe rule
+would stop the movement criterion firing with nothing to show for it.
 
-Feature points that are not finite are dropped before anything sees them.
-Captures have come back with most of the point cloud as NaN — scattered through
-it rather than at one end, and permanent once it starts. Whether ARCore produces
-those or this reads them wrong is still open, so the ratio is logged rather than
-passed over. A NaN reaching the keyframe rule would be worse than a lost point:
-every comparison against NaN is false, so the movement criterion would stop
-firing without any sign of it.
+That cloud has been thin enough to matter: 92% NaN across the sessions captured
+so far, and six of sixteen with no points at all, the most recent among them at
+thirty-seven frames and one point. Where nothing measured the distance the
+threshold falls back to an assumption, which is safe but is a fixed step in
+metres again — so the readout says `ASSUMED` rather than printing a number that
+looks measured.
 
 ## Status
 

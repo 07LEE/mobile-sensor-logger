@@ -10,7 +10,6 @@ void PendingFrame::Set(const FrameData& frame, float sharpness) {
   timestamp_ns_ = frame.timestamp_ns;
   pose_ = frame.pose;
   intrinsics_ = frame.intrinsics;
-  point_cloud_ = frame.point_cloud;
 
   const CameraImageView& image = frame.image;
   width_ = image.width;

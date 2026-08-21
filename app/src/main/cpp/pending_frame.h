@@ -31,7 +31,6 @@ class PendingFrame {
   int64_t timestamp_ns() const { return timestamp_ns_; }
   const CameraPose& pose() const { return pose_; }
   const CameraIntrinsics& intrinsics() const { return intrinsics_; }
-  const std::vector<FeaturePoint>& point_cloud() const { return point_cloud_; }
 
   int32_t width() const { return width_; }
   int32_t height() const { return height_; }
@@ -55,7 +54,6 @@ class PendingFrame {
   int64_t timestamp_ns_ = 0;
   CameraPose pose_{};
   CameraIntrinsics intrinsics_{};
-  std::vector<FeaturePoint> point_cloud_;
 
   int32_t width_ = 0;
   int32_t height_ = 0;

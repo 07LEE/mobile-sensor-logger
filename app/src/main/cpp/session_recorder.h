@@ -19,7 +19,6 @@ namespace sensor_logger {
 //
 // Layout under <root>/<session_id>/:
 //   poses.csv        one row per written frame
-//   points.csv       feature points, tagged with the frame they came from
 //   frames.csv       image dimensions, plane strides, and sharpness per frame
 //   imu.csv          accelerometer and gyroscope readings
 //   candidates.csv   pose and sharpness of every frame that was scored
@@ -98,9 +97,9 @@ class SessionRecorder {
                      float scene_distance_m);
   void FlushPending();
 
-  // Both run on the writer thread. Nothing else touches poses_, points_,
-  // frames_, written_frames_ or frames_without_image_ while it is running,
-  // which is what keeps them free of locking.
+  // Both run on the writer thread. Nothing else touches poses_, frames_,
+  // written_frames_ or frames_without_image_ while it is running, which is what
+  // keeps them free of locking.
   void WriteFrame(PendingFrame& frame);
   bool WriteImage(const PendingFrame& frame, const std::string& filename);
 
@@ -109,7 +108,6 @@ class SessionRecorder {
   bool recording_ = false;
   std::string session_path_;
   std::ofstream poses_;
-  std::ofstream points_;
   std::ofstream frames_;
   std::ofstream imu_;
   std::ofstream candidates_;

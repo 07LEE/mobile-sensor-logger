@@ -96,15 +96,13 @@ bool SessionRecorder::Start(const std::string& root,
   if (!MakeDirectory(session_path_ + "/frames")) return false;
 
   poses_.open(session_path_ + "/poses.csv", std::ios::out | std::ios::trunc);
-  points_.open(session_path_ + "/points.csv", std::ios::out | std::ios::trunc);
   frames_.open(session_path_ + "/frames.csv", std::ios::out | std::ios::trunc);
   imu_.open(session_path_ + "/imu.csv", std::ios::out | std::ios::trunc);
   candidates_.open(session_path_ + "/candidates.csv",
                    std::ios::out | std::ios::trunc);
-  if (!poses_.is_open() || !points_.is_open() || !frames_.is_open() ||
-      !imu_.is_open() || !candidates_.is_open()) {
+  if (!poses_.is_open() || !frames_.is_open() || !imu_.is_open() ||
+      !candidates_.is_open()) {
     poses_.close();
-    points_.close();
     frames_.close();
     imu_.close();
     candidates_.close();
@@ -113,7 +111,6 @@ bool SessionRecorder::Start(const std::string& root,
 
   poses_ << "timestamp_ns,tx,ty,tz,qx,qy,qz,qw,"
             "fx,fy,cx,cy,image_width,image_height\n";
-  points_ << "timestamp_ns,x,y,z,confidence\n";
   imu_ << "timestamp_ns,sensor,x,y,z\n";
   candidates_ << "timestamp_ns,tx,ty,tz,qx,qy,qz,qw,sharpness,point_count,"
                  "median_point_distance_m,translation_threshold_m\n";
@@ -232,18 +229,12 @@ void SessionRecorder::WriteFrame(PendingFrame& frame) {
          << intrinsics.principal_x << ',' << intrinsics.principal_y << ','
          << intrinsics.image_width << ',' << intrinsics.image_height << '\n';
 
-  for (const FeaturePoint& point : frame.point_cloud()) {
-    points_ << frame.timestamp_ns() << ',' << point.x << ',' << point.y
-            << ',' << point.z << ',' << point.confidence << '\n';
-  }
-
   ++written_frames_;
 
   // Flushed per frame rather than at Stop(). A session that ends by the process
   // being killed — which is how a backgrounded capture usually ends — would
   // otherwise leave the images on disk with empty CSVs describing them.
   poses_.flush();
-  points_.flush();
   frames_.flush();
 }
 
@@ -281,7 +272,6 @@ void SessionRecorder::Stop() {
   writer_.Stop();
 
   poses_.close();
-  points_.close();
   frames_.close();
   imu_.close();
   candidates_.close();
