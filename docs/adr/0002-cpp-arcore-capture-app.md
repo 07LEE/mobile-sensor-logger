@@ -9,6 +9,11 @@ Accepted.
 Supersedes [0001-standalone-mobile-sensor-logger](0001-standalone-mobile-sensor-logger.md),
 which is cancelled.
 
+The choice of ARCore is superseded by
+[0003-camera2-capture-without-arcore](0003-camera2-capture-without-arcore.md).
+Everything else here — C++ against a C API, no application Java or Kotlin, an
+image recorded for every recorded frame — still holds.
+
 ## Context
 
 This project is a mobile capture app. Its job is to get camera images and the
