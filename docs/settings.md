@@ -10,7 +10,7 @@ Read once at startup from `capture.conf` in the app's external files directory,
 which is where `adb push` reaches. Missing file or missing key means the
 default.
 
-```
+```ini
 capture   = max | 1920x1080     # largest the camera offers, or an exact size
 retention = sharpest | all      # selected frames, or every frame
 lens      = ultrawide | main | <camera id>
@@ -43,7 +43,6 @@ length, which on the tested device is a physical camera and cannot change.
 
 A requested size is used only if the chosen camera offers it exactly; otherwise
 it takes the largest and says so in the log.
-
 
 ## Which frames are kept
 
@@ -82,8 +81,7 @@ capture is spending it faster than intended.
 
 Every frame scored is logged whether or not its image was kept, so what a
 different threshold would have selected can be worked out from a capture already
-taken — see [candidates.csv](docs/output-format.md#files).
-
+taken — see [candidates.csv](output-format.md#files).
 
 ## Running out of room
 
@@ -100,4 +98,3 @@ Recording stops on its own with 2GB left, and the readout says
 to the last byte cannot write its own manifest — the settings, the counts and
 the calibration go with it — so a capture that filled a phone ends up unusable
 anyway. Sessions are never deleted; clearing them is a manual job.
-

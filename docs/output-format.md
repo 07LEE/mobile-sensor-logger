@@ -142,4 +142,3 @@ half-cycles bands the frame. The cap is rounded down to a multiple of one: at
 Left at `auto` the exposure is simply held wherever the scene metered, and the
 platform keeps doing this itself — the values it chose on the tested device,
 1/30 and 1/24, are both exact multiples of 8.333ms already.
-

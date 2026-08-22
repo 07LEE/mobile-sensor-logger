@@ -49,9 +49,11 @@ class PreviewRenderer {
   bool UploadCamera(const CameraImageView& image);
 
   // Draws the last uploaded frame, rotated upright by `sensor_orientation`
-  // degrees and letterboxed inside the top `height_fraction` of the screen.
-  // Pass 1 to fill it.
-  void DrawCamera(int32_t sensor_orientation, float height_fraction);
+  // degrees and letterboxed inside the `height_fraction` of the screen starting
+  // at `top_fraction`.
+  void DrawCamera(int32_t sensor_orientation, float height_fraction,
+                  float top_fraction = 0.0f);
+
 
   // Where the picture ended up on screen, in pixels from the top left, as of
   // the last DrawCamera. What a touch means depends on what is under it.

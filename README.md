@@ -48,7 +48,7 @@ The camera is not drawn unless volume up asks for it. The numbers are what the
 screen is for during a capture; the picture is for aiming, which happens between
 captures more than during one.
 
-```
+```text
 REC 0:57   36 MIN LEFT      elapsed, and how long the free space lasts
 153 KEPT / 1696 SEEN        frames written against frames scored
 2.9GB USED 111.0GB FREE
@@ -81,4 +81,3 @@ Hardware profiles and camera parameters for tested devices (Galaxy S25 Ultra, Ga
 
 - **Manual focus and exposure.** The capture request is the preview template, so
   both still follow the scene.
-

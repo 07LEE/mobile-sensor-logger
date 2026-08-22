@@ -645,10 +645,10 @@ extern "C" void android_main(android_app* app) {
     constexpr float kBtnHeight = 0.045f;
 
     if (state.preview_visible) {
-      state.preview.DrawCamera(state.camera.sensor_orientation(), 1.0f);
-      state.preview.DrawStatus(StatusLines(state),
-                               state.recorder.is_recording(), 0.0f, 40);
-      float btn_pos = 0.78f;
+      state.preview.DrawCamera(state.camera.sensor_orientation(), 0.58f, 0.05f);
+      float bottom = state.preview.DrawStatus(
+          StatusLines(state), state.recorder.is_recording(), 0.65f, 40);
+      float btn_pos = bottom + kGap;
       if (lens_choice) {
         state.preview.DrawLensButton(lens_label, btn_pos,
                                      !state.recorder.is_recording());
@@ -657,6 +657,7 @@ extern "C" void android_main(android_app* app) {
       state.preview.DrawSessionsButton("SESSIONS - TAP", btn_pos,
                                        !state.recorder.is_recording());
     } else {
+
       constexpr int kColumns = 32;
       const std::vector<std::string> lines = StatusLines(state);
       const float block =

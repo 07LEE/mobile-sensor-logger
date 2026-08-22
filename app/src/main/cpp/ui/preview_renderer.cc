@@ -349,7 +349,8 @@ bool PreviewRenderer::CameraRectContains(float x, float y) const {
 }
 
 void PreviewRenderer::DrawCamera(int32_t sensor_orientation,
-                                 float height_fraction) {
+                                 float height_fraction,
+                                 float top_fraction) {
   if (!camera_uploaded_ || viewport_width_ <= 0 || viewport_height_ <= 0) return;
 
   glDisable(GL_DEPTH_TEST);
@@ -380,10 +381,11 @@ void PreviewRenderer::DrawCamera(int32_t sensor_orientation,
   const float screen_aspect = static_cast<float>(viewport_width_) /
                               static_cast<float>(viewport_height_);
 
-  // The area the picture is fitted into: the whole screen at 1, or a band
-  // across the top of it below that.
+  // The area the picture is fitted into: bounded by top_fraction and height_fraction.
   if (height_fraction > 1.0f) height_fraction = 1.0f;
   if (height_fraction < 0.05f) height_fraction = 0.05f;
+  if (top_fraction < 0.0f) top_fraction = 0.0f;
+  if (top_fraction > 0.95f) top_fraction = 0.95f;
 
   const float area_aspect = screen_aspect / height_fraction;
 
@@ -395,14 +397,15 @@ void PreviewRenderer::DrawCamera(int32_t sensor_orientation,
     half_width = image_aspect / area_aspect;
   }
 
-  // Letterboxed inside the band, and the band pinned to the top of the screen.
-  const float band_top = 1.0f;
-  const float band_bottom = 1.0f - 2.0f * height_fraction;
+  // Letterboxed inside the band, positioned at top_fraction down the screen.
+  const float band_top = 1.0f - 2.0f * top_fraction;
+  const float band_bottom = 1.0f - 2.0f * (top_fraction + height_fraction);
   const float centre = (band_top + band_bottom) * 0.5f;
   const float span = (band_top - band_bottom) * 0.5f;
 
   const float top = centre + span * half_height;
   const float bottom = centre - span * half_height;
+
 
   camera_left_ = (1.0f - half_width) * 0.5f * viewport_width_;
   camera_right_ = (1.0f + half_width) * 0.5f * viewport_width_;
