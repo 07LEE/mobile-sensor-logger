@@ -836,15 +836,14 @@ extern "C" void android_main(android_app* app) {
     const bool lens_choice = state.camera.rear_camera_count() > 1;
 
     char lens_label[32];
-    std::snprintf(lens_label, sizeof(lens_label), "%s %.1FMM - TAP",
+    std::snprintf(lens_label, sizeof(lens_label), "%s %.1FMM",
                   state.camera.LensName(), state.camera.info().focal_length_mm);
 
     const char* retention_label = state.config.retention == Retention::kAll
-                                      ? "RETENTION ALL - TAP"
-                                      : "RETENTION SHARP - TAP";
+                                      ? "RETENTION ALL"
+                                      : "RETENTION SHARP";
 
-    const char* lock_label =
-        state.exposure_pinned ? "PINNED - TAP TO CLEAR" : "LOCK - TAP";
+    const char* lock_label = state.exposure_pinned ? "PINNED" : "LOCK";
 
     constexpr float kGap = 0.015f;
     constexpr float kBtnHeight = 0.040f;
@@ -875,7 +874,7 @@ extern "C" void android_main(android_app* app) {
                                      !state.recorder.is_recording());
         btn_pos += kOverlayBtnH + kOverlayGap;
       }
-      state.preview.DrawSessionsButton("SESSIONS - TAP", btn_pos,
+      state.preview.DrawSessionsButton("SESSIONS", btn_pos,
                                        !state.recorder.is_recording());
     } else {
 
@@ -900,7 +899,7 @@ extern "C" void android_main(android_app* app) {
                                      !state.recorder.is_recording());
         bottom += kBtnHeight + kGap;
       }
-      state.preview.DrawSessionsButton("SESSIONS - TAP", bottom + kGap,
+      state.preview.DrawSessionsButton("SESSIONS", bottom + kGap,
                                        !state.recorder.is_recording());
     }
 
