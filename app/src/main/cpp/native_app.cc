@@ -431,7 +431,20 @@ void StartCapture(AppState* state) {
 void StopCapture(AppState* state) {
   if (!state->capturing) return;
 
-  state->recorder.Stop();
+  // Mirrors ToggleRecording's stop branch: a real end location and a proper
+  // service teardown, not just whichever call site happens to remember to do
+  // it. Previously only ToggleRecording and the disk-full path did this, so a
+  // recording still in progress when the activity is destroyed (e.g. the
+  // system reclaiming it under memory pressure) got an invalid end_location
+  // and left the "background recording active" notification stuck with
+  // nothing left running to clear it.
+  if (state->recorder.is_recording()) {
+    sensor_logger::LocationData end_loc = GetLocationData(state->app);
+    state->recorder.Stop(end_loc);
+    StopRecordingService(state->app);
+  } else {
+    state->recorder.Stop();
+  }
   state->imu.Stop();
   state->camera.Stop();
   state->capturing = false;
