@@ -12,13 +12,6 @@ on a workstation.
 C++ throughout, against the Camera2 NDK, with no application Java or Kotlin.
 `GameActivity` hosts it.
 
-| | |
-| --- | --- |
-| [docs/output-format.md](docs/output-format.md) | what a session leaves on disk, and how to read it |
-| [docs/settings.md](docs/settings.md) | `capture.conf`, and what each choice costs |
-| [docs/devices.md](docs/devices.md) | hardware profiles and parameters for tested devices |
-| [docs/adr/](docs/adr/) | why it is built this way |
-
 ## Building and running
 
 ```bash
@@ -30,7 +23,7 @@ Needs the Android SDK, NDK and CMake; versions are pinned in
 `app/build.gradle.kts` and the wrapper. Built with JDK 21. There is no emulator
 path — the capture path is a real camera.
 
-| | |
+| Button | Action |
 | --- | --- |
 | **Volume down** | start and stop recording |
 | **Volume up** | show or hide the camera |
@@ -75,8 +68,17 @@ focus are held; watching them settle is how the moment to start is chosen.
 
 Hardware profiles and camera parameters for tested devices (Galaxy S25 Ultra, Galaxy Z Flip4) are documented in [docs/devices.md](docs/devices.md).
 
+## Documentation
+
+| Document | Description |
+| --- | --- |
+| [docs/output-format.md](docs/output-format.md) | what a session leaves on disk, and how to read it |
+| [docs/settings.md](docs/settings.md) | `capture.conf`, and what each choice costs |
+| [docs/devices.md](docs/devices.md) | hardware profiles and parameters for tested devices |
+| [docs/adr/](docs/adr/) | why it is built this way |
+
 ## Not implemented
 
 - **Manual focus and exposure.** The capture request is the preview template, so
   both still follow the scene.
-- **Cleaning up.** Old sessions are never removed; that is done over adb.
+
