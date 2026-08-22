@@ -110,6 +110,13 @@ void CameraSource::OnCaptureCompleted(void* context, ACameraCaptureSession*,
   out.awb_state = ReadU8(result, ACAMERA_CONTROL_AWB_STATE);
   out.af_state = ReadU8(result, ACAMERA_CONTROL_AF_STATE);
 
+  if (ACameraMetadata_getConstEntry(result, ACAMERA_CONTROL_AE_TARGET_FPS_RANGE,
+                                    &entry) == ACAMERA_OK &&
+      entry.count >= 2) {
+    out.fps_range_min = entry.data.i32[0];
+    out.fps_range_max = entry.data.i32[1];
+  }
+
   std::lock_guard<std::mutex> lock(self->results_mutex_);
   if (self->results_.size() >= kMaxQueuedResults) self->results_.pop_front();
   self->results_.push_back(std::move(out));

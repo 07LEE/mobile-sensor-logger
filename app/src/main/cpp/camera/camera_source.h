@@ -32,6 +32,13 @@ struct CaptureResult {
   int32_t awb_state = -1;
   int32_t af_state = -1;
 
+  // What the platform picked without being asked: nothing in this app sets
+  // ACAMERA_CONTROL_AE_TARGET_FPS_RANGE, so the rate the capture stream
+  // actually ran at is a default rather than a decision, and worth recording
+  // as one. -1 when the camera did not report it.
+  int32_t fps_range_min = -1;
+  int32_t fps_range_max = -1;
+
   // How long the sensor takes to read from its first row to its last. Rolling
   // shutter skews a frame by whatever the camera moved during that, and it is a
   // property of the readout rather than of the exposure, so shortening the

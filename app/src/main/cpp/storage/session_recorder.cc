@@ -132,7 +132,7 @@ bool SessionRecorder::Start(const std::string& root,
   candidates_ << "timestamp_ns,sharpness,shift,residual\n";
   capture_ << "timestamp_ns,exposure_ns,sensitivity,focus_diopters,"
               "rolling_shutter_skew_ns,ae_state,awb_state,af_state,"
-              "physical_id\n";
+              "fps_range_min,fps_range_max,physical_id\n";
 
   motion_.Reset();
   motion_.SetThresholds(config.min_shift, config.min_residual);
@@ -222,6 +222,7 @@ void SessionRecorder::RecordCaptureResults(
              << result.sensitivity << ',' << result.focus_distance << ','
              << result.rolling_shutter_skew_ns << ',' << result.ae_state << ','
              << result.awb_state << ',' << result.af_state << ','
+             << result.fps_range_min << ',' << result.fps_range_max << ','
              << result.physical_id << '\n';
   }
   capture_.flush();
