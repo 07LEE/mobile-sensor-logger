@@ -75,9 +75,6 @@ Hardware profiles and camera parameters for tested devices (Galaxy S25 Ultra, Ga
 | [docs/output-format.md](docs/output-format.md) | what a session leaves on disk, and how to read it |
 | [docs/settings.md](docs/settings.md) | `capture.conf`, and what each choice costs |
 | [docs/devices.md](docs/devices.md) | hardware profiles and parameters for tested devices |
+| [docs/roadmap.md](docs/roadmap.md) | planned features and future development roadmap |
 | [docs/adr/](docs/adr/) | why it is built this way |
 
-## Not implemented
-
-- **Manual focus and exposure.** The capture request is the preview template, so
-  both still follow the scene.
