@@ -143,19 +143,87 @@ void RequestCameraPermission(android_app* app) {
                                        "([Ljava/lang/String;I)V");
 
   jclass string_class = env->FindClass("java/lang/String");
-  jobjectArray permissions = env->NewObjectArray(2, string_class, nullptr);
+  jobjectArray permissions = env->NewObjectArray(4, string_class, nullptr);
   jstring cam_perm = env->NewStringUTF("android.permission.CAMERA");
   jstring notif_perm = env->NewStringUTF("android.permission.POST_NOTIFICATIONS");
+  jstring fine_loc = env->NewStringUTF("android.permission.ACCESS_FINE_LOCATION");
+  jstring coarse_loc = env->NewStringUTF("android.permission.ACCESS_COARSE_LOCATION");
+
   env->SetObjectArrayElement(permissions, 0, cam_perm);
   env->SetObjectArrayElement(permissions, 1, notif_perm);
+  env->SetObjectArrayElement(permissions, 2, fine_loc);
+  env->SetObjectArrayElement(permissions, 3, coarse_loc);
 
   env->CallVoidMethod(activity, request, permissions, 0);
 
   env->DeleteLocalRef(cam_perm);
   env->DeleteLocalRef(notif_perm);
+  env->DeleteLocalRef(fine_loc);
+  env->DeleteLocalRef(coarse_loc);
   env->DeleteLocalRef(permissions);
   env->DeleteLocalRef(string_class);
   env->DeleteLocalRef(activity_class);
+}
+
+sensor_logger::LocationData GetLocationData(android_app* app) {
+  sensor_logger::LocationData loc;
+  JNIEnv* env = nullptr;
+  app->activity->vm->AttachCurrentThread(&env, nullptr);
+
+  jobject activity = app->activity->javaGameActivity;
+  jclass activity_class = env->GetObjectClass(activity);
+
+  jstring service_name = env->NewStringUTF("location");
+  jmethodID get_system_service = env->GetMethodID(
+      activity_class, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
+  jobject loc_manager = env->CallObjectMethod(activity, get_system_service, service_name);
+  env->DeleteLocalRef(service_name);
+
+  if (loc_manager != nullptr) {
+    jclass loc_manager_class = env->GetObjectClass(loc_manager);
+
+    jstring gps_provider = env->NewStringUTF("gps");
+    jstring network_provider = env->NewStringUTF("network");
+
+    jmethodID get_last_known = env->GetMethodID(
+        loc_manager_class, "getLastKnownLocation",
+        "(Ljava/lang/String;)Landroid/location/Location;");
+
+    jobject location = env->CallObjectMethod(loc_manager, get_last_known, gps_provider);
+    if (location == nullptr) {
+      env->ExceptionClear();
+      location = env->CallObjectMethod(loc_manager, get_last_known, network_provider);
+    }
+
+    if (location != nullptr) {
+      jclass loc_class = env->GetObjectClass(location);
+      jmethodID get_lat = env->GetMethodID(loc_class, "getLatitude", "()D");
+      jmethodID get_lon = env->GetMethodID(loc_class, "getLongitude", "()D");
+      jmethodID get_alt = env->GetMethodID(loc_class, "getAltitude", "()D");
+      jmethodID get_acc = env->GetMethodID(loc_class, "getAccuracy", "()F");
+
+      loc.valid = true;
+      loc.latitude = env->CallDoubleMethod(location, get_lat);
+      loc.longitude = env->CallDoubleMethod(location, get_lon);
+      loc.altitude_m = env->CallDoubleMethod(location, get_alt);
+      loc.accuracy_m = env->CallFloatMethod(location, get_acc);
+
+      env->DeleteLocalRef(loc_class);
+      env->DeleteLocalRef(location);
+    } else {
+      env->ExceptionClear();
+    }
+
+    env->DeleteLocalRef(gps_provider);
+    env->DeleteLocalRef(network_provider);
+    env->DeleteLocalRef(loc_manager_class);
+    env->DeleteLocalRef(loc_manager);
+  } else {
+    env->ExceptionClear();
+  }
+
+  env->DeleteLocalRef(activity_class);
+  return loc;
 }
 
 jclass LoadRecordingServiceClass(JNIEnv* env, jobject activity) {
@@ -400,7 +468,8 @@ constexpr int64_t kMinimumFreeBytes = 2LL * 1000 * 1000 * 1000;
 
 void ToggleRecording(AppState* state) {
   if (state->recorder.is_recording()) {
-    state->recorder.Stop();
+    sensor_logger::LocationData end_loc = GetLocationData(state->app);
+    state->recorder.Stop(end_loc);
     StopRecordingService(state->app);
     state->camera.UnlockExposureAndFocus();
     __android_log_print(ANDROID_LOG_INFO, kTag,
@@ -431,8 +500,9 @@ void ToggleRecording(AppState* state) {
       state->exposure_pinned ? state->pinned_result : state->last_result,
       state->config.max_exposure_ns, state->config.mains_hz);
 
+  sensor_logger::LocationData start_loc = GetLocationData(state->app);
   if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
-                            state->camera.info(), state->config)) {
+                            state->camera.info(), state->config, start_loc)) {
     StartRecordingService(state->app);
     state->stop_reason = nullptr;
     __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
@@ -805,7 +875,8 @@ extern "C" void android_main(android_app* app) {
 
       if (state.recorder.is_recording() &&
           state.free_bytes < kMinimumFreeBytes) {
-        state.recorder.Stop();
+        sensor_logger::LocationData end_loc = GetLocationData(app);
+        state.recorder.Stop(end_loc);
         StopRecordingService(app);
         state.stop_reason = "STOPPED - DISK FULL";
         __android_log_print(ANDROID_LOG_WARN, kTag,

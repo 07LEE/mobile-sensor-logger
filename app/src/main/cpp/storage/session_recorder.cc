@@ -88,7 +88,8 @@ SessionRecorder::~SessionRecorder() { Stop(); }
 bool SessionRecorder::Start(const std::string& root,
                             int64_t start_timestamp_ns,
                             const CameraInfo& camera,
-                            const CaptureConfig& config) {
+                            const CaptureConfig& config,
+                            const LocationData& start_location) {
   if (recording_) return false;
   if (!MakeDirectory(root)) return false;
 
@@ -125,6 +126,7 @@ bool SessionRecorder::Start(const std::string& root,
   writer_.Start([this](PendingFrame& frame) { WriteFrame(frame); });
 
   start_timestamp_ns_ = start_timestamp_ns;
+  start_location_ = start_location;
   camera_ = camera;
   retention_ = config.retention;
   last_timestamp_ns_ = start_timestamp_ns;
@@ -267,7 +269,7 @@ bool SessionRecorder::WriteImage(const PendingFrame& frame,
   return true;
 }
 
-void SessionRecorder::Stop() {
+void SessionRecorder::Stop(const LocationData& end_location) {
   if (!recording_) return;
 
   // The last stretch is never closed by movement, so its leader would otherwise
@@ -281,14 +283,29 @@ void SessionRecorder::Stop() {
   imu_.close();
   candidates_.close();
   capture_.close();
-  WriteManifest(last_timestamp_ns_);
+  WriteManifest(last_timestamp_ns_, end_location);
   recording_ = false;
 }
 
-void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
+void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
+                                     const LocationData& end_location) {
   std::ofstream manifest(session_path_ + "/session.json",
                          std::ios::out | std::ios::trunc);
   if (!manifest.is_open()) return;
+
+  const double duration_seconds =
+      (end_timestamp_ns > start_timestamp_ns_)
+          ? static_cast<double>(end_timestamp_ns - start_timestamp_ns_) / 1e9
+          : 0.0;
+  const double average_fps =
+      (duration_seconds > 0.0) ? (considered_frames_ / duration_seconds) : 0.0;
+
+  double fov_h = 0.0;
+  double fov_v = 0.0;
+  if (camera_.focal_length_mm > 0.0f && camera_.sensor_width_mm > 0.0f) {
+    fov_h = 2.0 * std::atan(camera_.sensor_width_mm / (2.0 * camera_.focal_length_mm)) * 180.0 / 3.14159265358979323846;
+    fov_v = 2.0 * std::atan(camera_.sensor_height_mm / (2.0 * camera_.focal_length_mm)) * 180.0 / 3.14159265358979323846;
+  }
 
   // Which phone this came from. Every measurement in a session is a property of
   // its camera and its sensors, and the format assumptions along with them, so
@@ -297,12 +314,20 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"device\": \""
            << Escaped(SystemProperty("ro.product.manufacturer")) << " "
            << Escaped(SystemProperty("ro.product.model")) << "\",\n"
+           << "  \"device_brand\": \""
+           << Escaped(SystemProperty("ro.product.brand")) << "\",\n"
+           << "  \"device_board\": \""
+           << Escaped(SystemProperty("ro.product.board")) << "\",\n"
+           << "  \"build_fingerprint\": \""
+           << Escaped(SystemProperty("ro.build.fingerprint")) << "\",\n"
            << "  \"android_release\": \""
            << Escaped(SystemProperty("ro.build.version.release")) << "\",\n"
            << "  \"android_sdk\": "
            << SystemProperty("ro.build.version.sdk") << ",\n"
            << "  \"start_timestamp_ns\": " << start_timestamp_ns_ << ",\n"
            << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
+           << "  \"duration_seconds\": " << duration_seconds << ",\n"
+           << "  \"average_fps\": " << average_fps << ",\n"
            << "  \"written_frames\": " << written_frames_.load() << ",\n"
            << "  \"written_bytes\": " << written_bytes_.load() << ",\n"
            << "  \"considered_frames\": " << considered_frames_ << ",\n"
@@ -319,6 +344,7 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
            << "  \"aperture\": " << camera_.aperture << ",\n"
            << "  \"sensor_size_mm\": [" << camera_.sensor_width_mm << ", "
            << camera_.sensor_height_mm << "],\n"
+           << "  \"fov_deg\": [" << fov_h << ", " << fov_v << "],\n"
            << "  \"calibration_note\": \"intrinsics [fx, fy, cx, cy, skew] "
               "and distortion [k1, k2, k3, p1, p2] as the manufacturer measured "
               "them, against pre_correction_active_array; scale if that "
@@ -351,6 +377,24 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns) {
              << "],\n"
              << "  \"lens_pose_reference\": " << camera_.pose_reference
              << ",\n";
+  }
+
+  if (start_location_.valid) {
+    manifest << "  \"start_location\": {\"latitude\": " << start_location_.latitude
+             << ", \"longitude\": " << start_location_.longitude
+             << ", \"altitude_m\": " << start_location_.altitude_m
+             << ", \"accuracy_m\": " << start_location_.accuracy_m << "},\n";
+  } else {
+    manifest << "  \"start_location\": null,\n";
+  }
+
+  if (end_location.valid) {
+    manifest << "  \"end_location\": {\"latitude\": " << end_location.latitude
+             << ", \"longitude\": " << end_location.longitude
+             << ", \"altitude_m\": " << end_location.altitude_m
+             << ", \"accuracy_m\": " << end_location.accuracy_m << "},\n";
+  } else {
+    manifest << "  \"end_location\": null,\n";
   }
 
   manifest << "  \"stabilisation\": \"off, both optical and digital; either "

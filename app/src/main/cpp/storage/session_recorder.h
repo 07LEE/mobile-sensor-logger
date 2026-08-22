@@ -18,6 +18,14 @@
 
 namespace sensor_logger {
 
+struct LocationData {
+  bool valid = false;
+  double latitude = 0.0;
+  double longitude = 0.0;
+  double altitude_m = 0.0;
+  float accuracy_m = 0.0f;
+};
+
 // Writes one capture session to disk.
 //
 // Layout under <root>/<session_id>/:
@@ -63,7 +71,8 @@ class SessionRecorder {
 
   // Creates the session directory under `root` and opens the log files.
   bool Start(const std::string& root, int64_t start_timestamp_ns,
-             const CameraInfo& camera, const CaptureConfig& config);
+             const CameraInfo& camera, const CaptureConfig& config,
+             const LocationData& start_location = LocationData());
 
   // Offers a frame. Scored and buffered; written only if it ends up the
   // sharpest of its stretch.
@@ -80,7 +89,7 @@ class SessionRecorder {
   void RecordCaptureResults(const std::vector<CaptureResult>& results);
 
   // Writes any buffered frame, then closes the session.
-  void Stop();
+  void Stop(const LocationData& end_location = LocationData());
 
   bool is_recording() const { return recording_; }
   int64_t written_frames() const { return written_frames_; }
@@ -122,7 +131,8 @@ class SessionRecorder {
   void WriteFrame(PendingFrame& frame);
   bool WriteImage(const PendingFrame& frame, const std::string& filename);
 
-  void WriteManifest(int64_t end_timestamp_ns);
+  void WriteManifest(int64_t end_timestamp_ns,
+                     const LocationData& end_location);
 
   bool recording_ = false;
   std::string session_path_;
@@ -136,6 +146,7 @@ class SessionRecorder {
   FrameWriter writer_;
 
   int64_t start_timestamp_ns_ = 0;
+  LocationData start_location_{};
   CameraInfo camera_{};
   Retention retention_ = Retention::kSharpest;
   int64_t last_timestamp_ns_ = 0;
