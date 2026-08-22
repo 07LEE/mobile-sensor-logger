@@ -11,11 +11,21 @@ bool SessionsOverlay::CloseTouched(float x, float y) const {
          y >= close_button_top_ && y <= close_button_bottom_;
 }
 
+bool SessionsOverlay::PrevPageTouched(float x, float y) const {
+  return prev_enabled_ && x >= prev_button_left_ && x <= prev_button_right_ &&
+         y >= prev_button_top_ && y <= prev_button_bottom_;
+}
+
+bool SessionsOverlay::NextPageTouched(float x, float y) const {
+  return next_enabled_ && x >= next_button_left_ && x <= next_button_right_ &&
+         y >= next_button_top_ && y <= next_button_bottom_;
+}
+
 int SessionsOverlay::ItemDeleteTouched(float x, float y) const {
-  for (size_t i = 0; i < item_delete_rects_.size(); ++i) {
-    const auto& r = item_delete_rects_[i];
+  for (size_t row = 0; row < item_delete_rects_.size(); ++row) {
+    const auto& r = item_delete_rects_[row];
     if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
-      return static_cast<int>(i);
+      return page_start_ + static_cast<int>(row);
     }
   }
   return -1;
@@ -25,9 +35,20 @@ void SessionsOverlay::Draw(
     GLuint quad_program, GLuint white_texture, GLuint text_texture,
     GLint quad_color_location, GLuint vbo,
     const std::vector<SessionItem>& sessions,
-    int pending_delete_index, int viewport_width, int viewport_height,
+    int pending_delete_index, int page, int viewport_width, int viewport_height,
     const std::function<void(const std::vector<std::string>&, int)>& rasterize_text_fn) {
   if (viewport_width <= 0 || viewport_height <= 0) return;
+
+  const int total = static_cast<int>(sessions.size());
+  const int page_count = total == 0 ? 1 : (total + kSessionsPerPage - 1) / kSessionsPerPage;
+  if (page < 0) page = 0;
+  if (page > page_count - 1) page = page_count - 1;
+  page_start_ = page * kSessionsPerPage;
+  const int page_end = page_start_ + kSessionsPerPage < total
+                            ? page_start_ + kSessionsPerPage
+                            : total;
+  prev_enabled_ = page > 0;
+  next_enabled_ = page < page_count - 1;
 
   const float vp_w = static_cast<float>(viewport_width);
   const float vp_h = static_cast<float>(viewport_height);
@@ -60,17 +81,25 @@ void SessionsOverlay::Draw(
 
   item_delete_rects_.clear();
 
-  // Render header
-  std::vector<std::string> header = {"=== SAVED SESSIONS ==="};
-  rasterize_text_fn(header, 22);
+  // Render header, with a page indicator once there is more than one page.
+  char header_buf[40];
+  if (page_count > 1) {
+    std::snprintf(header_buf, sizeof(header_buf), "=== SESSIONS (%d/%d) ===",
+                  page + 1, page_count);
+  } else {
+    std::snprintf(header_buf, sizeof(header_buf), "=== SAVED SESSIONS ===");
+  }
+  std::vector<std::string> header = {header_buf};
+  const int header_cols = static_cast<int>(std::strlen(header_buf));
+  rasterize_text_fn(header, header_cols);
   glBindTexture(GL_TEXTURE_2D, text_texture);
 
-  const float h_used = 22.0f / static_cast<float>(kTextColumns);
+  const float h_used = static_cast<float>(header_cols) / static_cast<float>(kTextColumns);
   const float h_row = 1.0f / static_cast<float>(kTextRows);
   const float h_uvs[8] = {0.0f, h_row, h_used, h_row, 0.0f, 0.0f, h_used, 0.0f};
 
   const float text_w_px = vp_w * 0.84f;
-  const float h_scale = text_w_px / static_cast<float>(22 * kCellWidth);
+  const float h_scale = text_w_px / static_cast<float>(header_cols * kCellWidth);
   const float h_height_px = static_cast<float>(kCellHeight) * h_scale;
   const float h_top = d_top - 0.04f;
   const float h_bottom = h_top - 2.0f * h_height_px / vp_h;
@@ -88,12 +117,11 @@ void SessionsOverlay::Draw(
     const float e_bottom = e_top - 2.0f * h_height_px / vp_h;
     DrawQuad(quad_program, vbo, -0.80f, e_bottom, 0.80f, e_top, e_uvs);
   } else {
-    // Render individual session rows
-    const int max_show = static_cast<int>(sessions.size()) < 8 ? static_cast<int>(sessions.size()) : 8;
+    // Render this page's session rows
     float current_y = h_bottom - 0.04f;
     constexpr float kRowH = 0.07f;
 
-    for (int i = 0; i < max_show; ++i) {
+    for (int i = page_start_; i < page_end; ++i) {
       const auto& sess = sessions[static_cast<size_t>(i)];
       const float row_top = current_y;
       const float row_bottom = row_top - kRowH;
@@ -168,14 +196,18 @@ void SessionsOverlay::Draw(
     }
   }
 
-  // Close Button at bottom center
-  constexpr float kBtnW = 0.50f;
+  // Close button at bottom center; flanked by PREV/NEXT once paginated.
   constexpr float kBtnH = 0.06f;
+  constexpr float kCloseWSingle = 0.50f;
+  constexpr float kCloseWPaged = 0.34f;
+  constexpr float kSideBtnW = 0.32f;
 
+  const bool paginated = page_count > 1;
+  const float close_w = paginated ? kCloseWPaged : kCloseWSingle;
   const float close_top = d_bottom + 0.08f;
   const float close_bottom = close_top - kBtnH;
-  const float close_left = -kBtnW * 0.5f;
-  const float close_right = kBtnW * 0.5f;
+  const float close_left = -close_w * 0.5f;
+  const float close_right = close_w * 0.5f;
 
   close_button_left_ = (close_left + 1.0f) * 0.5f * vp_w;
   close_button_right_ = (close_right + 1.0f) * 0.5f * vp_w;
@@ -193,7 +225,7 @@ void SessionsOverlay::Draw(
   const float c_row = 1.0f / static_cast<float>(kTextRows);
   const float c_uvs[8] = {0.0f, c_row, c_used, c_row, 0.0f, 0.0f, c_used, 0.0f};
 
-  const float c_box_w = vp_w * kBtnW * 0.5f;
+  const float c_box_w = vp_w * close_w * 0.5f;
   const float c_box_h = vp_h * kBtnH * 0.5f;
   const float c_sw = c_box_w * 0.85f / static_cast<float>(9 * kCellWidth);
   const float c_sh = c_box_h * 0.65f / static_cast<float>(kGlyphHeight);
@@ -207,6 +239,68 @@ void SessionsOverlay::Draw(
   glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, 1.0f);
   DrawQuad(quad_program, vbo, c_cx - c_lw * 0.5f, c_cy - c_lh * 0.5f,
                  c_cx + c_lw * 0.5f, c_cy + c_lh * 0.5f, c_uvs);
+
+  if (paginated) {
+    const float prev_left = -0.90f;
+    const float prev_right = prev_left + kSideBtnW;
+    const float next_right = 0.90f;
+    const float next_left = next_right - kSideBtnW;
+
+    prev_button_left_ = (prev_left + 1.0f) * 0.5f * vp_w;
+    prev_button_right_ = (prev_right + 1.0f) * 0.5f * vp_w;
+    prev_button_top_ = close_button_top_;
+    prev_button_bottom_ = close_button_bottom_;
+
+    next_button_left_ = (next_left + 1.0f) * 0.5f * vp_w;
+    next_button_right_ = (next_right + 1.0f) * 0.5f * vp_w;
+    next_button_top_ = close_button_top_;
+    next_button_bottom_ = close_button_bottom_;
+
+    glBindTexture(GL_TEXTURE_2D, white_texture);
+    glUniform4f(quad_color_location, 0.25f, 0.28f, 0.35f,
+                prev_enabled_ ? 1.0f : 0.5f);
+    DrawQuad(quad_program, vbo, prev_left, close_bottom, prev_right, close_top, kFullUvs);
+
+    glUniform4f(quad_color_location, 0.25f, 0.28f, 0.35f,
+                next_enabled_ ? 1.0f : 0.5f);
+    DrawQuad(quad_program, vbo, next_left, close_bottom, next_right, close_top, kFullUvs);
+
+    const std::string prev_label = "< PREV";
+    const std::string next_label = "NEXT >";
+    const int p_cols = static_cast<int>(prev_label.size());
+    const int n_cols = static_cast<int>(next_label.size());
+    const float side_box_w = vp_w * kSideBtnW * 0.5f;
+
+    rasterize_text_fn({prev_label}, p_cols);
+    glBindTexture(GL_TEXTURE_2D, text_texture);
+    const float p_used = static_cast<float>(p_cols) / static_cast<float>(kTextColumns);
+    const float p_uvs[8] = {0.0f, c_row, p_used, c_row, 0.0f, 0.0f, p_used, 0.0f};
+    const float p_sw = side_box_w * 0.85f / static_cast<float>(p_cols * kCellWidth);
+    const float p_sh = c_box_h * 0.65f / static_cast<float>(kGlyphHeight);
+    const float p_sc = p_sw < p_sh ? p_sw : p_sh;
+    const float p_lw = 2.0f * static_cast<float>(p_cols * kCellWidth) * p_sc / vp_w;
+    const float p_lh = 2.0f * static_cast<float>(kGlyphHeight) * p_sc / vp_h;
+    const float p_cx = (prev_left + prev_right) * 0.5f;
+
+    glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, prev_enabled_ ? 1.0f : 0.45f);
+    DrawQuad(quad_program, vbo, p_cx - p_lw * 0.5f, c_cy - p_lh * 0.5f,
+             p_cx + p_lw * 0.5f, c_cy + p_lh * 0.5f, p_uvs);
+
+    rasterize_text_fn({next_label}, n_cols);
+    glBindTexture(GL_TEXTURE_2D, text_texture);
+    const float n_used = static_cast<float>(n_cols) / static_cast<float>(kTextColumns);
+    const float n_uvs[8] = {0.0f, c_row, n_used, c_row, 0.0f, 0.0f, n_used, 0.0f};
+    const float n_sw = side_box_w * 0.85f / static_cast<float>(n_cols * kCellWidth);
+    const float n_sh = c_box_h * 0.65f / static_cast<float>(kGlyphHeight);
+    const float n_sc = n_sw < n_sh ? n_sw : n_sh;
+    const float n_lw = 2.0f * static_cast<float>(n_cols * kCellWidth) * n_sc / vp_w;
+    const float n_lh = 2.0f * static_cast<float>(kGlyphHeight) * n_sc / vp_h;
+    const float n_cx = (next_left + next_right) * 0.5f;
+
+    glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, next_enabled_ ? 1.0f : 0.45f);
+    DrawQuad(quad_program, vbo, n_cx - n_lw * 0.5f, c_cy - n_lh * 0.5f,
+             n_cx + n_lw * 0.5f, c_cy + n_lh * 0.5f, n_uvs);
+  }
 
   glDisable(GL_BLEND);
 }

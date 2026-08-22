@@ -33,6 +33,7 @@ using sensor_logger::Input;
 using sensor_logger::PendingFrame;
 using sensor_logger::PreviewRenderer;
 using sensor_logger::SessionRecorder;
+using sensor_logger::SessionsOverlay;
 
 constexpr char kTag[] = "sensor_logger";
 
@@ -90,6 +91,7 @@ struct AppState {
   bool preview_visible = false;
   bool sessions_overlay_visible = false;
   int pending_delete_index = -1;
+  int sessions_page = 0;
   bool permission_granted = false;
 
   // The sessions overlay's contents. Fetched once when the overlay opens
@@ -579,6 +581,12 @@ extern "C" void android_main(android_app* app) {
         if (state.preview.CloseOverlayContains(input.x, input.y)) {
           state.sessions_overlay_visible = false;
           state.pending_delete_index = -1;
+        } else if (state.preview.PrevPageOverlayContains(input.x, input.y)) {
+          state.sessions_page -= 1;
+          state.pending_delete_index = -1;
+        } else if (state.preview.NextPageOverlayContains(input.x, input.y)) {
+          state.sessions_page += 1;
+          state.pending_delete_index = -1;
         } else {
           int touched_idx = state.preview.ItemDeleteOverlayTouched(input.x, input.y);
           if (touched_idx >= 0) {
@@ -610,6 +618,7 @@ extern "C" void android_main(android_app* app) {
           if (!state.recorder.is_recording()) {
             state.sessions_overlay_visible = !state.sessions_overlay_visible;
             state.pending_delete_index = -1;
+            state.sessions_page = 0;
             if (state.sessions_overlay_visible) {
               state.cached_sessions =
                   SessionRecorder::GetSessions(SessionRoot(state.app));
@@ -698,7 +707,8 @@ extern "C" void android_main(android_app* app) {
     }
 
     if (state.sessions_overlay_visible) {
-      state.preview.DrawSessionsOverlay(state.cached_sessions, state.pending_delete_index);
+      state.preview.DrawSessionsOverlay(state.cached_sessions, state.pending_delete_index,
+                                        state.sessions_page);
     }
 
     eglSwapBuffers(state.display, state.surface);

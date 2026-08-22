@@ -78,10 +78,13 @@ class PreviewRenderer {
   void DrawSessionsButton(const std::string& label, float top_fraction, bool enabled);
   bool SessionsButtonContains(float x, float y) const;
 
-  // Render sessions overlay dialog with individual delete buttons and confirm state.
+  // Render sessions overlay dialog with individual delete buttons and confirm
+  // state. `page` is 0-based; see SessionsOverlay::kSessionsPerPage.
   void DrawSessionsOverlay(const std::vector<SessionItem>& sessions,
-                           int pending_delete_index);
+                           int pending_delete_index, int page);
   bool CloseOverlayContains(float x, float y) const;
+  bool PrevPageOverlayContains(float x, float y) const;
+  bool NextPageOverlayContains(float x, float y) const;
   int ItemDeleteOverlayTouched(float x, float y) const;
 
  private:

@@ -415,6 +415,14 @@ bool PreviewRenderer::CloseOverlayContains(float x, float y) const {
   return sessions_overlay_.CloseTouched(x, y);
 }
 
+bool PreviewRenderer::PrevPageOverlayContains(float x, float y) const {
+  return sessions_overlay_.PrevPageTouched(x, y);
+}
+
+bool PreviewRenderer::NextPageOverlayContains(float x, float y) const {
+  return sessions_overlay_.NextPageTouched(x, y);
+}
+
 int PreviewRenderer::ItemDeleteOverlayTouched(float x, float y) const {
   return sessions_overlay_.ItemDeleteTouched(x, y);
 }
@@ -443,10 +451,10 @@ void PreviewRenderer::DrawSessionsButton(const std::string& label,
 
 void PreviewRenderer::DrawSessionsOverlay(
     const std::vector<SessionItem>& sessions,
-    int pending_delete_index) {
+    int pending_delete_index, int page) {
   sessions_overlay_.Draw(
       quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
-      sessions, pending_delete_index, viewport_width_, viewport_height_,
+      sessions, pending_delete_index, page, viewport_width_, viewport_height_,
       [this](const std::vector<std::string>& lines, int columns) {
         RasterizeText(lines, columns);
       });
