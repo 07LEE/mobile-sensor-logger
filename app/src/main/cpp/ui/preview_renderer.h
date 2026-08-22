@@ -81,6 +81,10 @@ class PreviewRenderer {
   void DrawRetentionButton(const std::string& label, float top_fraction, bool enabled);
   bool RetentionButtonContains(float x, float y) const;
 
+  void DrawLockButton(const std::string& label, float top_fraction, bool enabled,
+                      bool pinned);
+  bool LockButtonContains(float x, float y) const;
+
   // Render sessions overlay dialog with individual delete buttons and confirm
   // state. `page` is 0-based; how many sessions fit on one is computed from
   // the viewport (see SessionsOverlay::Draw).
@@ -118,6 +122,7 @@ class PreviewRenderer {
   UiButton lens_button_;
   UiButton sessions_button_;
   UiButton retention_button_;
+  UiButton lock_button_;
   SessionsOverlay sessions_overlay_;
 
   std::vector<uint8_t> chroma_pixels_;

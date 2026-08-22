@@ -422,6 +422,10 @@ bool PreviewRenderer::RetentionButtonContains(float x, float y) const {
   return retention_button_.Contains(x, y);
 }
 
+bool PreviewRenderer::LockButtonContains(float x, float y) const {
+  return lock_button_.Contains(x, y);
+}
+
 bool PreviewRenderer::CloseOverlayContains(float x, float y) const {
   return sessions_overlay_.CloseTouched(x, y);
 }
@@ -465,6 +469,24 @@ void PreviewRenderer::DrawRetentionButton(const std::string& label,
   retention_button_.Draw(
       quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
       label, top_fraction, 0.56f, 0.045f, 0.16f, 0.30f, 0.20f, 0.95f,
+      enabled, viewport_width_, viewport_height_,
+      [this](const std::vector<std::string>& lines, int columns) {
+        RasterizeText(lines, columns);
+      });
+}
+
+void PreviewRenderer::DrawLockButton(const std::string& label,
+                                     float top_fraction, bool enabled,
+                                     bool pinned) {
+  // Brighter, more saturated amber while pinned so the state is obvious at a
+  // glance rather than only readable from the label text — the whole point
+  // is not starting a recording on a stale pin without noticing.
+  const float red = pinned ? 0.85f : 0.30f;
+  const float green = pinned ? 0.55f : 0.24f;
+  const float blue = pinned ? 0.05f : 0.08f;
+  lock_button_.Draw(
+      quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
+      label, top_fraction, 0.56f, 0.045f, red, green, blue, 0.95f,
       enabled, viewport_width_, viewport_height_,
       [this](const std::vector<std::string>& lines, int columns) {
         RasterizeText(lines, columns);

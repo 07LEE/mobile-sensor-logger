@@ -76,6 +76,14 @@ struct AppState {
   // decision to start is made, and they only settle while nothing is locked.
   sensor_logger::CaptureResult last_result;
 
+  // A metered result pinned ahead of time by the lock button, so recording
+  // can be started from wherever the phone happens to be pointed without
+  // locking onto whatever that happens to meter to — pointing at a blown-out
+  // window right as the record key is pressed otherwise dooms the whole
+  // session. Stays pinned across sessions until the button clears it.
+  bool exposure_pinned = false;
+  sensor_logger::CaptureResult pinned_result;
+
   // Why the last session ended, when it was not asked to. Shown until the next
   // one starts, since the reason is worth more at the moment of finding out
   // than in a log read afterwards.
@@ -307,10 +315,12 @@ void ToggleRecording(AppState* state) {
 
   // Locked before the first frame is kept, not at startup: by now the camera
   // has been metering this room for as long as it took to point the phone at
-  // it, so what it settled on is what gets held.
-  state->camera.LockExposureAndFocus(state->last_result,
-                                     state->config.max_exposure_ns,
-                                     state->config.mains_hz);
+  // it, so what it settled on is what gets held. Unless a metered result was
+  // pinned ahead of time, in which case that is what gets held instead,
+  // regardless of what the phone is pointed at right now.
+  state->camera.LockExposureAndFocus(
+      state->exposure_pinned ? state->pinned_result : state->last_result,
+      state->config.max_exposure_ns, state->config.mains_hz);
 
   if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
                             state->camera.info(), state->config)) {
@@ -366,6 +376,28 @@ void ToggleRetention(AppState* state) {
   state->config.retention = state->config.retention == Retention::kAll
                                 ? Retention::kSharpest
                                 : Retention::kAll;
+}
+
+// Pins the current metered result so a recording started later locks onto it
+// rather than onto whatever the phone happens to be pointed at when the
+// record key is pressed — tapping again clears the pin.
+//
+// Refused while recording for the same reason as the others: the pin only
+// takes effect at the next recording start, so changing it mid-session would
+// look like it did something and would not.
+void ToggleExposurePin(AppState* state) {
+  if (state->recorder.is_recording()) {
+    LogInfo("not changing the exposure pin while recording; stop first");
+    return;
+  }
+
+  if (state->exposure_pinned) {
+    state->exposure_pinned = false;
+    return;
+  }
+
+  state->pinned_result = state->last_result;
+  state->exposure_pinned = true;
 }
 
 // Shutter speed the way it is written on a camera, since 41621860 nanoseconds
@@ -463,9 +495,10 @@ std::vector<std::string> StatusLines(const AppState& state) {
     std::snprintf(focus, sizeof(focus), "INF");
   }
 
-  std::snprintf(buffer, sizeof(buffer), "%s ISO%d %s%s",
+  std::snprintf(buffer, sizeof(buffer), "%s ISO%d %s%s%s",
                 Shutter(result.exposure_ns).c_str(), result.sensitivity, focus,
-                state.camera.is_locked() ? " LOCKED" : "");
+                state.camera.is_locked() ? " LOCKED" : "",
+                state.exposure_pinned ? " PIN" : "");
   lines.emplace_back(buffer);
 
   // Anything but zero in the first two means the capture is outrunning the
@@ -645,6 +678,8 @@ extern "C" void android_main(android_app* app) {
           }
         } else if (state.preview.RetentionButtonContains(input.x, input.y)) {
           ToggleRetention(&state);
+        } else if (state.preview.LockButtonContains(input.x, input.y)) {
+          ToggleExposurePin(&state);
         }
       }
     }
@@ -696,14 +731,29 @@ extern "C" void android_main(android_app* app) {
                                       ? "RETENTION ALL - TAP"
                                       : "RETENTION SHARP - TAP";
 
+    const char* lock_label =
+        state.exposure_pinned ? "PINNED - TAP TO CLEAR" : "LOCK - TAP";
+
     constexpr float kGap = 0.02f;
     constexpr float kBtnHeight = 0.045f;
 
+    // Ordered by how often each gets touched around a recording rather than
+    // alphabetically or by when it was added: the lock is checked before
+    // nearly every take, retention and lens far less often, and sessions is
+    // an occasional housekeeping visit — so it sits furthest from a thumb
+    // reaching for the others in a hurry.
     if (state.preview_visible) {
       state.preview.DrawCamera(state.camera.sensor_orientation(), 0.58f, 0.05f);
       float bottom = state.preview.DrawStatus(
           StatusLines(state), state.recorder.is_recording(), 0.65f, 40);
       float btn_pos = bottom + kGap;
+      state.preview.DrawLockButton(lock_label, btn_pos,
+                                   !state.recorder.is_recording(),
+                                   state.exposure_pinned);
+      btn_pos += kBtnHeight + kGap;
+      state.preview.DrawRetentionButton(retention_label, btn_pos,
+                                        !state.recorder.is_recording());
+      btn_pos += kBtnHeight + kGap;
       if (lens_choice) {
         state.preview.DrawLensButton(lens_label, btn_pos,
                                      !state.recorder.is_recording());
@@ -711,20 +761,24 @@ extern "C" void android_main(android_app* app) {
       }
       state.preview.DrawSessionsButton("SESSIONS - TAP", btn_pos,
                                        !state.recorder.is_recording());
-      btn_pos += kBtnHeight + kGap;
-      state.preview.DrawRetentionButton(retention_label, btn_pos,
-                                        !state.recorder.is_recording());
     } else {
 
       constexpr int kColumns = 32;
       const std::vector<std::string> lines = StatusLines(state);
       const float block =
           state.preview.StatusHeightFraction(kColumns, (int)lines.size()) +
-          (lens_choice ? kGap + kBtnHeight : 0.0f) + 2 * (kGap + kBtnHeight);
+          (lens_choice ? kGap + kBtnHeight : 0.0f) + 3 * (kGap + kBtnHeight);
       const float top = (1.0f - block) * 0.5f;
 
       float bottom = state.preview.DrawStatus(
           lines, state.recorder.is_recording(), top, kColumns);
+      state.preview.DrawLockButton(lock_label, bottom + kGap,
+                                   !state.recorder.is_recording(),
+                                   state.exposure_pinned);
+      bottom += kBtnHeight + kGap;
+      state.preview.DrawRetentionButton(retention_label, bottom + kGap,
+                                        !state.recorder.is_recording());
+      bottom += kBtnHeight + kGap;
       if (lens_choice) {
         state.preview.DrawLensButton(lens_label, bottom + kGap,
                                      !state.recorder.is_recording());
@@ -732,9 +786,6 @@ extern "C" void android_main(android_app* app) {
       }
       state.preview.DrawSessionsButton("SESSIONS - TAP", bottom + kGap,
                                        !state.recorder.is_recording());
-      bottom += kBtnHeight + kGap;
-      state.preview.DrawRetentionButton(retention_label, bottom + kGap,
-                                        !state.recorder.is_recording());
     }
 
     if (state.sessions_overlay_visible) {
