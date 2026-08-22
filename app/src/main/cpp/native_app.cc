@@ -152,6 +152,87 @@ void RequestCameraPermission(android_app* app) {
   env->DeleteLocalRef(activity_class);
 }
 
+void StartRecordingService(android_app* app) {
+  JNIEnv* env = nullptr;
+  app->activity->vm->AttachCurrentThread(&env, nullptr);
+
+  jobject activity = app->activity->javaGameActivity;
+  jclass activity_class = env->GetObjectClass(activity);
+
+  jclass service_class = env->FindClass("com/sensor/logger/RecordingService");
+  if (service_class != nullptr) {
+    jclass intent_class = env->FindClass("android/content/Intent");
+    jmethodID intent_init = env->GetMethodID(intent_class, "<init>",
+                                             "(Landroid/content/Context;Ljava/lang/Class;)V");
+    jobject intent = env->NewObject(intent_class, intent_init, activity, service_class);
+
+    jmethodID start_service = env->GetMethodID(
+        activity_class, "startForegroundService",
+        "(Landroid/content/Intent;)Landroid/content/ComponentName;");
+    if (start_service == nullptr) {
+      env->ExceptionClear();
+      start_service = env->GetMethodID(
+          activity_class, "startService",
+          "(Landroid/content/Intent;)Landroid/content/ComponentName;");
+    }
+
+    if (start_service != nullptr) {
+      env->CallObjectMethod(activity, start_service, intent);
+    }
+
+    env->DeleteLocalRef(intent);
+    env->DeleteLocalRef(intent_class);
+    env->DeleteLocalRef(service_class);
+  } else {
+    env->ExceptionClear();
+  }
+
+  env->DeleteLocalRef(activity_class);
+}
+
+void StopRecordingService(android_app* app) {
+  JNIEnv* env = nullptr;
+  app->activity->vm->AttachCurrentThread(&env, nullptr);
+
+  jobject activity = app->activity->javaGameActivity;
+  jclass activity_class = env->GetObjectClass(activity);
+
+  jclass service_class = env->FindClass("com/sensor/logger/RecordingService");
+  if (service_class != nullptr) {
+    jclass intent_class = env->FindClass("android/content/Intent");
+    jmethodID intent_init = env->GetMethodID(intent_class, "<init>",
+                                             "(Landroid/content/Context;Ljava/lang/Class;)V");
+    jobject intent = env->NewObject(intent_class, intent_init, activity, service_class);
+
+    jfieldID action_stop_field = env->GetStaticFieldID(
+        service_class, "ACTION_STOP", "Ljava/lang/String;");
+    if (action_stop_field != nullptr) {
+      jstring action_stop = static_cast<jstring>(
+          env->GetStaticObjectField(service_class, action_stop_field));
+      jmethodID set_action = env->GetMethodID(
+          intent_class, "setAction",
+          "(Ljava/lang/String;)Landroid/content/Intent;");
+      env->CallObjectMethod(intent, set_action, action_stop);
+      env->DeleteLocalRef(action_stop);
+    }
+
+    jmethodID start_service = env->GetMethodID(
+        activity_class, "startService",
+        "(Landroid/content/Intent;)Landroid/content/ComponentName;");
+    if (start_service != nullptr) {
+      env->CallObjectMethod(activity, start_service, intent);
+    }
+
+    env->DeleteLocalRef(intent);
+    env->DeleteLocalRef(intent_class);
+    env->DeleteLocalRef(service_class);
+  } else {
+    env->ExceptionClear();
+  }
+
+  env->DeleteLocalRef(activity_class);
+}
+
 std::string FilesRoot(android_app* app) {
   return app->activity->externalDataPath != nullptr
              ? app->activity->externalDataPath
@@ -293,6 +374,7 @@ constexpr int64_t kMinimumFreeBytes = 2LL * 1000 * 1000 * 1000;
 void ToggleRecording(AppState* state) {
   if (state->recorder.is_recording()) {
     state->recorder.Stop();
+    StopRecordingService(state->app);
     state->camera.UnlockExposureAndFocus();
     __android_log_print(ANDROID_LOG_INFO, kTag,
                         "stopped: %lld written, %lld considered, %lld dropped",
@@ -324,6 +406,7 @@ void ToggleRecording(AppState* state) {
 
   if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
                             state->camera.info(), state->config)) {
+    StartRecordingService(state->app);
     state->stop_reason = nullptr;
     __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
                         state->recorder.session_path().c_str());
@@ -527,10 +610,11 @@ void HandleCommand(android_app* app, int32_t cmd) {
       break;
 
     case APP_CMD_PAUSE:
-      // Stopping the session here rather than on destroy: one left open across
-      // a backgrounding would be truncated with no manifest. The camera has to
-      // go too — Android takes it away regardless.
-      StopCapture(state);
+      // If we are currently recording, the Foreground Service keeps camera & IMU
+      // capture active in the background. Only stop capture if not recording.
+      if (!state->recorder.is_recording()) {
+        StopCapture(state);
+      }
       break;
 
     case APP_CMD_RESUME:
@@ -695,6 +779,7 @@ extern "C" void android_main(android_app* app) {
       if (state.recorder.is_recording() &&
           state.free_bytes < kMinimumFreeBytes) {
         state.recorder.Stop();
+        StopRecordingService(app);
         state.stop_reason = "STOPPED - DISK FULL";
         __android_log_print(ANDROID_LOG_WARN, kTag,
                             "stopped: %lld bytes free, %lld written",

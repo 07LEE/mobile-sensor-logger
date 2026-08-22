@@ -13,6 +13,7 @@ As the C++ codebase expanded, all 25 header and source files resided flatly unde
 ## Decision
 
 Reorganize all native source files into domain-driven subdirectories under `app/src/main/cpp/`:
+
 - `ui/`: OpenGL ES 3.0 rendering, HUD widgets, and dialog overlays.
 - `camera/`: NDK Camera2 capture session management and image buffer wrappers.
 - `sensors/`: NDK ASensorManager accelerometer and gyroscope event logging.
