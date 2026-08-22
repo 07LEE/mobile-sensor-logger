@@ -9,6 +9,8 @@
 
 #include "camera_image.h"
 #include "session_recorder.h"
+#include "sessions_overlay.h"
+#include "ui_button.h"
 
 namespace sensor_logger {
 
@@ -106,32 +108,10 @@ class PreviewRenderer {
   float camera_right_ = 0.0f;
   float camera_bottom_ = 0.0f;
 
-  // Bounds set by DrawLensButton and DrawSessionsButton.
-  float lens_button_left_ = 0.0f;
-  float lens_button_top_ = 0.0f;
-  float lens_button_right_ = 0.0f;
-  float lens_button_bottom_ = 0.0f;
+  UiButton lens_button_;
+  UiButton sessions_button_;
+  SessionsOverlay sessions_overlay_;
 
-  float sessions_button_left_ = 0.0f;
-  float sessions_button_top_ = 0.0f;
-  float sessions_button_right_ = 0.0f;
-  float sessions_button_bottom_ = 0.0f;
-
-  // Overlay button rects
-  float close_button_left_ = 0.0f;
-  float close_button_top_ = 0.0f;
-  float close_button_right_ = 0.0f;
-  float close_button_bottom_ = 0.0f;
-
-  float delete_all_button_left_ = 0.0f;
-  float delete_all_button_top_ = 0.0f;
-  float delete_all_button_right_ = 0.0f;
-  float delete_all_button_bottom_ = 0.0f;
-
-  struct ItemRect {
-    float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
-  };
-  std::vector<ItemRect> item_delete_rects_;
   std::vector<uint8_t> chroma_pixels_;
 
   int viewport_width_ = 0;

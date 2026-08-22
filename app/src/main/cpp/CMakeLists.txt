@@ -27,6 +27,8 @@ add_library(sensor_logger SHARED
     imu_source.cc
     input.cc
     session_recorder.cc
+    ui_button.cc
+    sessions_overlay.cc
 )
 
 target_include_directories(sensor_logger PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
