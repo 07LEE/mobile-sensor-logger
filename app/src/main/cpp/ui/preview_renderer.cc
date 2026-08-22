@@ -231,6 +231,13 @@ void PreviewRenderer::Destroy() {
   luma_texture_ = 0;
   chroma_texture_ = 0;
   camera_uploaded_ = false;
+  // luma_texture_/chroma_texture_ just lost their GL storage along with their
+  // names. Without this, the next UploadCamera after a fresh Init sees the
+  // same width/height as before and skips the glTexImage2D that allocates
+  // it, uploading into a texture that was never sized — which is where the
+  // solid green preview after a screen-off/resume came from.
+  camera_width_ = 0;
+  camera_height_ = 0;
   text_texture_ = 0;
   white_texture_ = 0;
   camera_program_ = 0;
