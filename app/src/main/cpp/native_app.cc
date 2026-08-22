@@ -349,6 +349,25 @@ void NextLens(AppState* state) {
   state->last_timestamp_ns = 0;
 }
 
+// Switches between keeping only the sharpest frame of each stretch and
+// keeping every frame.
+//
+// Refused while recording for the same reason as the lens: SessionRecorder
+// only reads `retention` when a session starts, so flipping it mid-session
+// would silently keep doing whatever the session started with, and a button
+// that looks like it did something but did not is worse than one that
+// visibly refuses.
+void ToggleRetention(AppState* state) {
+  if (state->recorder.is_recording()) {
+    LogInfo("not changing retention while recording; stop first");
+    return;
+  }
+
+  state->config.retention = state->config.retention == Retention::kAll
+                                ? Retention::kSharpest
+                                : Retention::kAll;
+}
+
 // Shutter speed the way it is written on a camera, since 41621860 nanoseconds
 // is not a number anyone reads.
 std::string Shutter(int64_t exposure_ns) {
@@ -624,6 +643,8 @@ extern "C" void android_main(android_app* app) {
                   SessionRecorder::GetSessions(SessionRoot(state.app));
             }
           }
+        } else if (state.preview.RetentionButtonContains(input.x, input.y)) {
+          ToggleRetention(&state);
         }
       }
     }
@@ -671,6 +692,10 @@ extern "C" void android_main(android_app* app) {
     std::snprintf(lens_label, sizeof(lens_label), "%s %.1FMM - TAP",
                   state.camera.LensName(), state.camera.info().focal_length_mm);
 
+    const char* retention_label = state.config.retention == Retention::kAll
+                                      ? "RETENTION ALL - TAP"
+                                      : "RETENTION SHARP - TAP";
+
     constexpr float kGap = 0.02f;
     constexpr float kBtnHeight = 0.045f;
 
@@ -686,13 +711,16 @@ extern "C" void android_main(android_app* app) {
       }
       state.preview.DrawSessionsButton("SESSIONS - TAP", btn_pos,
                                        !state.recorder.is_recording());
+      btn_pos += kBtnHeight + kGap;
+      state.preview.DrawRetentionButton(retention_label, btn_pos,
+                                        !state.recorder.is_recording());
     } else {
 
       constexpr int kColumns = 32;
       const std::vector<std::string> lines = StatusLines(state);
       const float block =
           state.preview.StatusHeightFraction(kColumns, (int)lines.size()) +
-          (lens_choice ? kGap + kBtnHeight : 0.0f) + kGap + kBtnHeight;
+          (lens_choice ? kGap + kBtnHeight : 0.0f) + 2 * (kGap + kBtnHeight);
       const float top = (1.0f - block) * 0.5f;
 
       float bottom = state.preview.DrawStatus(
@@ -704,6 +732,9 @@ extern "C" void android_main(android_app* app) {
       }
       state.preview.DrawSessionsButton("SESSIONS - TAP", bottom + kGap,
                                        !state.recorder.is_recording());
+      bottom += kBtnHeight + kGap;
+      state.preview.DrawRetentionButton(retention_label, bottom + kGap,
+                                        !state.recorder.is_recording());
     }
 
     if (state.sessions_overlay_visible) {

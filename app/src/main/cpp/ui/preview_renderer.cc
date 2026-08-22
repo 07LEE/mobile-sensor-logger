@@ -411,6 +411,10 @@ bool PreviewRenderer::SessionsButtonContains(float x, float y) const {
   return sessions_button_.Contains(x, y);
 }
 
+bool PreviewRenderer::RetentionButtonContains(float x, float y) const {
+  return retention_button_.Contains(x, y);
+}
+
 bool PreviewRenderer::CloseOverlayContains(float x, float y) const {
   return sessions_overlay_.CloseTouched(x, y);
 }
@@ -443,6 +447,17 @@ void PreviewRenderer::DrawSessionsButton(const std::string& label,
   sessions_button_.Draw(
       quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
       label, top_fraction, 0.56f, 0.045f, 0.16f, 0.22f, 0.35f, 0.95f,
+      enabled, viewport_width_, viewport_height_,
+      [this](const std::vector<std::string>& lines, int columns) {
+        RasterizeText(lines, columns);
+      });
+}
+
+void PreviewRenderer::DrawRetentionButton(const std::string& label,
+                                          float top_fraction, bool enabled) {
+  retention_button_.Draw(
+      quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
+      label, top_fraction, 0.56f, 0.045f, 0.16f, 0.30f, 0.20f, 0.95f,
       enabled, viewport_width_, viewport_height_,
       [this](const std::vector<std::string>& lines, int columns) {
         RasterizeText(lines, columns);
