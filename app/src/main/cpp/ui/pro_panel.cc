@@ -148,10 +148,14 @@ void ProPanel::Draw(
              kDialogRight - 0.03f, row_top, kFullUvs);
 
     const float cy = (row_top + row_bottom) * 0.5f;
+    // Same scale_columns (26) and fills as the three rows above, so RESET's
+    // shorter label renders at the same glyph size instead of being blown up
+    // to fill the space it has to spare — see DrawScaledLabel's scale_columns
+    // note on why a shared constant beats each label's own length here.
     DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
-                    "RESET TO AUTO", 13, 13,
+                    "RESET TO AUTO", 13, 26,
                     vp_w * (kDialogRight - kDialogLeft - 0.06f) * 0.5f,
-                    vp_h * kRowH * 0.5f, 0.85f, 0.60f, LabelAnchor::kCenter,
+                    vp_h * kRowH * 0.5f, 0.92f, 0.60f, LabelAnchor::kCenter,
                     0.0f, cy, vp_w, vp_h, 1.0f, 1.0f, 1.0f, 1.0f,
                     rasterize_text_fn);
 
