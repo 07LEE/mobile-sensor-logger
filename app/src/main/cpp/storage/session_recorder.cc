@@ -381,8 +381,13 @@ int64_t GetDirectorySize(const std::string& path) {
   while ((p = readdir(d)) != nullptr) {
     if (std::strcmp(p->d_name, ".") == 0 || std::strcmp(p->d_name, "..") == 0) continue;
     std::string subpath = path + "/" + p->d_name;
+    // lstat, not stat: a symlink must be counted/removed as the leaf it is,
+    // never followed. Nothing in this app creates one today, but a followed
+    // symlink here would recurse into (GetDirectorySize) or delete through
+    // (RemoveDirectoryRecursive) whatever it points to, including outside the
+    // session directory.
     struct stat statbuf;
-    if (stat(subpath.c_str(), &statbuf) == 0) {
+    if (lstat(subpath.c_str(), &statbuf) == 0) {
       if (S_ISDIR(statbuf.st_mode)) {
         total += GetDirectorySize(subpath);
       } else {
@@ -401,8 +406,9 @@ bool RemoveDirectoryRecursive(const std::string& path) {
   while ((p = readdir(d)) != nullptr) {
     if (std::strcmp(p->d_name, ".") == 0 || std::strcmp(p->d_name, "..") == 0) continue;
     std::string subpath = path + "/" + p->d_name;
+    // lstat: see GetDirectorySize above.
     struct stat statbuf;
-    if (stat(subpath.c_str(), &statbuf) == 0) {
+    if (lstat(subpath.c_str(), &statbuf) == 0) {
       if (S_ISDIR(statbuf.st_mode)) {
         RemoveDirectoryRecursive(subpath);
       } else {
