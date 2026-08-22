@@ -159,6 +159,14 @@ class SessionRecorder {
   LocationData start_location_{};
   CameraInfo camera_{};
   Retention retention_ = Retention::kSharpest;
+
+  // Carried through from CaptureConfig only for the manifest: what a session
+  // actually asked for, next to what it measured, so the two can be told
+  // apart later instead of assumed.
+  int64_t max_exposure_ns_ = 0;
+  int32_t mains_hz_ = 0;
+  int32_t fixed_fps_ = 0;
+
   int64_t last_timestamp_ns_ = 0;
   std::atomic<int64_t> written_frames_{0};
   std::atomic<int64_t> written_bytes_{0};

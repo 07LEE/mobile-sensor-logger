@@ -143,6 +143,9 @@ bool SessionRecorder::Start(const std::string& root,
   start_location_ = start_location;
   camera_ = camera;
   retention_ = config.retention;
+  max_exposure_ns_ = config.max_exposure_ns;
+  mains_hz_ = config.mains_hz;
+  fixed_fps_ = config.fixed_fps;
   last_timestamp_ns_ = start_timestamp_ns;
   written_frames_ = 0;
   written_bytes_ = 0;
@@ -367,6 +370,21 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << (retention_ == Retention::kAll ? "all" : "sharpest") << "\",\n"
            << "  \"min_shift\": " << motion_.min_shift() << ",\n"
            << "  \"min_residual\": " << motion_.min_residual() << ",\n"
+           << "  \"shutter\": \"";
+  if (max_exposure_ns_ > 0) {
+    manifest << "1/" << (1000000000LL / max_exposure_ns_);
+  } else {
+    manifest << "auto";
+  }
+  manifest << "\",\n"
+           << "  \"mains_hz\": " << mains_hz_ << ",\n"
+           << "  \"fps\": \"";
+  if (fixed_fps_ > 0) {
+    manifest << fixed_fps_;
+  } else {
+    manifest << "auto";
+  }
+  manifest << "\",\n"
            << "  \"camera_id\": \"" << camera_.id << "\",\n"
            << "  \"focal_length_mm\": " << camera_.focal_length_mm << ",\n"
            << "  \"aperture\": " << camera_.aperture << ",\n"
