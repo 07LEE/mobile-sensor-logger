@@ -462,7 +462,7 @@ void PreviewRenderer::DrawSessionsButton(const std::string& label,
 }
 
 void PreviewRenderer::DrawSessionsOverlay(
-    const std::vector<SessionRecorder::SessionItem>& sessions,
+    const std::vector<SessionItem>& sessions,
     int pending_delete_index) {
   sessions_overlay_.Draw(
       quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,

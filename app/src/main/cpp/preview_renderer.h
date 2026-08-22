@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "camera_image.h"
-#include "session_recorder.h"
+#include "session_item.h"
 #include "sessions_overlay.h"
 #include "ui_button.h"
 
@@ -77,7 +77,7 @@ class PreviewRenderer {
   bool SessionsButtonContains(float x, float y) const;
 
   // Render sessions overlay dialog with individual delete buttons and confirm state.
-  void DrawSessionsOverlay(const std::vector<SessionRecorder::SessionItem>& sessions,
+  void DrawSessionsOverlay(const std::vector<SessionItem>& sessions,
                            int pending_delete_index);
   bool CloseOverlayContains(float x, float y) const;
   int ItemDeleteOverlayTouched(float x, float y) const;

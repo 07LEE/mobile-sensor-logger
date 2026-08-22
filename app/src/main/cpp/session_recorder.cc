@@ -416,7 +416,7 @@ bool RemoveDirectoryRecursive(const std::string& path) {
 
 }  // namespace
 
-std::vector<SessionRecorder::SessionItem> SessionRecorder::GetSessions(
+std::vector<SessionItem> SessionRecorder::GetSessions(
     const std::string& session_root) {
   std::vector<SessionItem> results;
   DIR* d = opendir(session_root.c_str());

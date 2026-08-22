@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "session_recorder.h"
+#include "session_item.h"
 
 namespace sensor_logger {
 
@@ -24,7 +24,7 @@ class SessionsOverlay {
 
   void Draw(GLuint quad_program, GLuint white_texture, GLuint text_texture,
             GLint quad_color_location, GLuint vbo,
-            const std::vector<SessionRecorder::SessionItem>& sessions,
+            const std::vector<SessionItem>& sessions,
             int pending_delete_index, int viewport_width, int viewport_height,
             const std::function<void(const std::vector<std::string>&, int)>& rasterize_text_fn);
 

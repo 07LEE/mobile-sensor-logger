@@ -14,6 +14,7 @@
 #include "frame_writer.h"
 #include "imu_source.h"
 #include "pending_frame.h"
+#include "session_item.h"
 
 namespace sensor_logger {
 
@@ -98,12 +99,6 @@ class SessionRecorder {
                : 0;
   }
   const std::string& session_path() const { return session_path_; }
-
-  struct SessionItem {
-    std::string name;
-    std::string full_path;
-    double megabytes = 0.0;
-  };
 
   // Scans <root> directory and returns list of session items.
   static std::vector<SessionItem> GetSessions(const std::string& session_root);

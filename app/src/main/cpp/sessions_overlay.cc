@@ -52,7 +52,7 @@ int SessionsOverlay::ItemDeleteTouched(float x, float y) const {
 void SessionsOverlay::Draw(
     GLuint quad_program, GLuint white_texture, GLuint text_texture,
     GLint quad_color_location, GLuint vbo,
-    const std::vector<SessionRecorder::SessionItem>& sessions,
+    const std::vector<SessionItem>& sessions,
     int pending_delete_index, int viewport_width, int viewport_height,
     const std::function<void(const std::vector<std::string>&, int)>& rasterize_text_fn) {
   if (viewport_width <= 0 || viewport_height <= 0) return;
