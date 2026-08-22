@@ -142,14 +142,45 @@ void RequestCameraPermission(android_app* app) {
   jmethodID request = env->GetMethodID(activity_class, "requestPermissions",
                                        "([Ljava/lang/String;I)V");
 
-  jobjectArray permissions = env->NewObjectArray(
-      1, env->FindClass("java/lang/String"),
-      env->NewStringUTF("android.permission.CAMERA"));
+  jclass string_class = env->FindClass("java/lang/String");
+  jobjectArray permissions = env->NewObjectArray(2, string_class, nullptr);
+  jstring cam_perm = env->NewStringUTF("android.permission.CAMERA");
+  jstring notif_perm = env->NewStringUTF("android.permission.POST_NOTIFICATIONS");
+  env->SetObjectArrayElement(permissions, 0, cam_perm);
+  env->SetObjectArrayElement(permissions, 1, notif_perm);
 
   env->CallVoidMethod(activity, request, permissions, 0);
 
+  env->DeleteLocalRef(cam_perm);
+  env->DeleteLocalRef(notif_perm);
   env->DeleteLocalRef(permissions);
+  env->DeleteLocalRef(string_class);
   env->DeleteLocalRef(activity_class);
+}
+
+jclass LoadRecordingServiceClass(JNIEnv* env, jobject activity) {
+  jclass activity_class = env->GetObjectClass(activity);
+  jmethodID get_class_loader = env->GetMethodID(
+      activity_class, "getClassLoader", "()Ljava/lang/ClassLoader;");
+  jobject class_loader = env->CallObjectMethod(activity, get_class_loader);
+  jclass class_loader_class = env->GetObjectClass(class_loader);
+  jmethodID load_class = env->GetMethodID(
+      class_loader_class, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+
+  jstring class_name = env->NewStringUTF("com.sensor.logger.RecordingService");
+  jclass service_class = static_cast<jclass>(
+      env->CallObjectMethod(class_loader, load_class, class_name));
+
+  env->DeleteLocalRef(class_name);
+  env->DeleteLocalRef(class_loader_class);
+  env->DeleteLocalRef(class_loader);
+  env->DeleteLocalRef(activity_class);
+
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return nullptr;
+  }
+  return service_class;
 }
 
 void StartRecordingService(android_app* app) {
@@ -158,8 +189,8 @@ void StartRecordingService(android_app* app) {
 
   jobject activity = app->activity->javaGameActivity;
   jclass activity_class = env->GetObjectClass(activity);
+  jclass service_class = LoadRecordingServiceClass(env, activity);
 
-  jclass service_class = env->FindClass("com/sensor/logger/RecordingService");
   if (service_class != nullptr) {
     jclass intent_class = env->FindClass("android/content/Intent");
     jmethodID intent_init = env->GetMethodID(intent_class, "<init>",
@@ -183,8 +214,6 @@ void StartRecordingService(android_app* app) {
     env->DeleteLocalRef(intent);
     env->DeleteLocalRef(intent_class);
     env->DeleteLocalRef(service_class);
-  } else {
-    env->ExceptionClear();
   }
 
   env->DeleteLocalRef(activity_class);
@@ -196,8 +225,8 @@ void StopRecordingService(android_app* app) {
 
   jobject activity = app->activity->javaGameActivity;
   jclass activity_class = env->GetObjectClass(activity);
+  jclass service_class = LoadRecordingServiceClass(env, activity);
 
-  jclass service_class = env->FindClass("com/sensor/logger/RecordingService");
   if (service_class != nullptr) {
     jclass intent_class = env->FindClass("android/content/Intent");
     jmethodID intent_init = env->GetMethodID(intent_class, "<init>",
@@ -226,8 +255,6 @@ void StopRecordingService(android_app* app) {
     env->DeleteLocalRef(intent);
     env->DeleteLocalRef(intent_class);
     env->DeleteLocalRef(service_class);
-  } else {
-    env->ExceptionClear();
   }
 
   env->DeleteLocalRef(activity_class);
