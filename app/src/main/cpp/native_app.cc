@@ -112,9 +112,9 @@ struct AppState {
   std::vector<sensor_logger::SessionItem> cached_sessions;
 };
 
-// Runtime camera permission, requested through JNI because there is no native
-// entry point for it. Returns true once the permission is already held.
-bool HasCameraPermission(android_app* app) {
+// Runtime permission check, through JNI because there is no native entry
+// point for it.
+bool HasPermission(android_app* app, const char* permission) {
   JNIEnv* env = nullptr;
   app->activity->vm->AttachCurrentThread(&env, nullptr);
 
@@ -123,14 +123,35 @@ bool HasCameraPermission(android_app* app) {
   jmethodID check_permission = env->GetMethodID(
       context_class, "checkSelfPermission", "(Ljava/lang/String;)I");
 
-  jstring permission = env->NewStringUTF("android.permission.CAMERA");
-  const jint result = env->CallIntMethod(activity, check_permission, permission);
+  jstring permission_str = env->NewStringUTF(permission);
+  const jint result = env->CallIntMethod(activity, check_permission, permission_str);
 
-  env->DeleteLocalRef(permission);
+  env->DeleteLocalRef(permission_str);
   env->DeleteLocalRef(context_class);
 
   // PackageManager.PERMISSION_GRANTED
   return result == 0;
+}
+
+bool HasCameraPermission(android_app* app) {
+  return HasPermission(app, "android.permission.CAMERA");
+}
+
+// POST_NOTIFICATIONS and the location permissions are requested alongside
+// CAMERA (see RequestCameraPermission below) but nothing else ever checks
+// whether they actually landed. A denial otherwise shows up only as the
+// background-recording notification silently never appearing, or every
+// session's location fields silently staying null — logged once, when camera
+// permission first comes back granted, so a denial is at least diagnosable
+// from logcat instead of indistinguishable from "no fix yet".
+void LogOptionalPermissions(android_app* app) {
+  if (!HasPermission(app, "android.permission.POST_NOTIFICATIONS")) {
+    LogInfo("POST_NOTIFICATIONS denied; the background-recording notification will not show");
+  }
+  if (!HasPermission(app, "android.permission.ACCESS_FINE_LOCATION") &&
+      !HasPermission(app, "android.permission.ACCESS_COARSE_LOCATION")) {
+    LogInfo("location permissions denied; sessions will have no start/end location");
+  }
 }
 
 void RequestCameraPermission(android_app* app) {
@@ -251,19 +272,44 @@ jclass LoadRecordingServiceClass(JNIEnv* env, jobject activity) {
   return service_class;
 }
 
+// Cached as a global ref after the first successful resolution. A jclass
+// local ref from LoadRecordingServiceClass is only valid for the JNIEnv call
+// that produced it, but Start/StopRecordingService look this up on every
+// single recording start and stop — a full getClassLoader()->loadClass()
+// reflection round trip each time for something that never changes at
+// runtime.
+jclass CachedRecordingServiceClass(JNIEnv* env, jobject activity) {
+  static jclass cached = nullptr;
+  if (cached != nullptr) return cached;
+
+  jclass local = LoadRecordingServiceClass(env, activity);
+  if (local == nullptr) return nullptr;
+
+  cached = static_cast<jclass>(env->NewGlobalRef(local));
+  env->DeleteLocalRef(local);
+  return cached;
+}
+
+// Builds `new Intent(activity, service_class)`. Caller deletes the local ref.
+jobject BuildServiceIntent(JNIEnv* env, jobject activity, jclass service_class) {
+  jclass intent_class = env->FindClass("android/content/Intent");
+  jmethodID intent_init = env->GetMethodID(
+      intent_class, "<init>", "(Landroid/content/Context;Ljava/lang/Class;)V");
+  jobject intent = env->NewObject(intent_class, intent_init, activity, service_class);
+  env->DeleteLocalRef(intent_class);
+  return intent;
+}
+
 void StartRecordingService(android_app* app) {
   JNIEnv* env = nullptr;
   app->activity->vm->AttachCurrentThread(&env, nullptr);
 
   jobject activity = app->activity->javaGameActivity;
   jclass activity_class = env->GetObjectClass(activity);
-  jclass service_class = LoadRecordingServiceClass(env, activity);
+  jclass service_class = CachedRecordingServiceClass(env, activity);
 
   if (service_class != nullptr) {
-    jclass intent_class = env->FindClass("android/content/Intent");
-    jmethodID intent_init = env->GetMethodID(intent_class, "<init>",
-                                             "(Landroid/content/Context;Ljava/lang/Class;)V");
-    jobject intent = env->NewObject(intent_class, intent_init, activity, service_class);
+    jobject intent = BuildServiceIntent(env, activity, service_class);
 
     jmethodID start_service = env->GetMethodID(
         activity_class, "startForegroundService",
@@ -277,11 +323,11 @@ void StartRecordingService(android_app* app) {
 
     if (start_service != nullptr) {
       env->CallObjectMethod(activity, start_service, intent);
+    } else {
+      env->ExceptionClear();
     }
 
     env->DeleteLocalRef(intent);
-    env->DeleteLocalRef(intent_class);
-    env->DeleteLocalRef(service_class);
   }
 
   env->DeleteLocalRef(activity_class);
@@ -293,24 +339,29 @@ void StopRecordingService(android_app* app) {
 
   jobject activity = app->activity->javaGameActivity;
   jclass activity_class = env->GetObjectClass(activity);
-  jclass service_class = LoadRecordingServiceClass(env, activity);
+  jclass service_class = CachedRecordingServiceClass(env, activity);
 
   if (service_class != nullptr) {
-    jclass intent_class = env->FindClass("android/content/Intent");
-    jmethodID intent_init = env->GetMethodID(intent_class, "<init>",
-                                             "(Landroid/content/Context;Ljava/lang/Class;)V");
-    jobject intent = env->NewObject(intent_class, intent_init, activity, service_class);
+    jobject intent = BuildServiceIntent(env, activity, service_class);
 
     jfieldID action_stop_field = env->GetStaticFieldID(
         service_class, "ACTION_STOP", "Ljava/lang/String;");
     if (action_stop_field != nullptr) {
       jstring action_stop = static_cast<jstring>(
           env->GetStaticObjectField(service_class, action_stop_field));
+      jclass intent_class = env->GetObjectClass(intent);
       jmethodID set_action = env->GetMethodID(
           intent_class, "setAction",
           "(Ljava/lang/String;)Landroid/content/Intent;");
       env->CallObjectMethod(intent, set_action, action_stop);
       env->DeleteLocalRef(action_stop);
+      env->DeleteLocalRef(intent_class);
+    } else {
+      // Field lookup failed — e.g. RecordingService was resolved but no
+      // longer defines ACTION_STOP. Clear the pending exception before any
+      // further JNI call: leaving one set is undefined behavior per the JNI
+      // spec, not just for this call but for whatever runs next.
+      env->ExceptionClear();
     }
 
     jmethodID start_service = env->GetMethodID(
@@ -321,8 +372,6 @@ void StopRecordingService(android_app* app) {
     }
 
     env->DeleteLocalRef(intent);
-    env->DeleteLocalRef(intent_class);
-    env->DeleteLocalRef(service_class);
   }
 
   env->DeleteLocalRef(activity_class);
@@ -750,6 +799,8 @@ extern "C" void android_main(android_app* app) {
   state.permission_granted = HasCameraPermission(app);
   if (!state.permission_granted) {
     RequestCameraPermission(app);
+  } else {
+    LogOptionalPermissions(app);
   }
 
   FrameData frame;
@@ -788,8 +839,9 @@ extern "C" void android_main(android_app* app) {
 
     if (!state.permission_granted) {
       state.permission_granted = HasCameraPermission(app);
-      if (state.permission_granted && state.display != EGL_NO_DISPLAY) {
-        StartCapture(&state);
+      if (state.permission_granted) {
+        LogOptionalPermissions(app);
+        if (state.display != EGL_NO_DISPLAY) StartCapture(&state);
       }
       continue;
     }
