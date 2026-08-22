@@ -5,6 +5,11 @@ local.properties
 .idea/
 *.iml
 
+# Local IDE and compilation database containing developer system paths
+compile_commands.json
+.clangd
+.vscode/
+
 # Captured sessions pulled off the device. Gigabytes of raw YUV; kept out of
 # the repository and off any remote.
 /data/

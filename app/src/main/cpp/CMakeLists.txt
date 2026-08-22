@@ -17,21 +17,29 @@ set(CMAKE_SHARED_LINKER_FLAGS
 
 add_library(sensor_logger SHARED
     native_app.cc
-    camera_source.cc
-    capture_config.cc
-    frame_motion.cc
-    pending_frame.cc
-    preview_renderer.cc
-    sharpness.cc
-    frame_writer.cc
-    imu_source.cc
-    input.cc
-    session_recorder.cc
-    ui_button.cc
-    sessions_overlay.cc
+    camera/camera_source.cc
+    camera/capture_config.cc
+    pipeline/frame_motion.cc
+    pipeline/pending_frame.cc
+    pipeline/sharpness.cc
+    ui/preview_renderer.cc
+    ui/ui_button.cc
+    ui/sessions_overlay.cc
+    storage/frame_writer.cc
+    storage/session_recorder.cc
+    sensors/imu_source.cc
+    input/input.cc
 )
 
-target_include_directories(sensor_logger PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(sensor_logger PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui
+    ${CMAKE_CURRENT_SOURCE_DIR}/camera
+    ${CMAKE_CURRENT_SOURCE_DIR}/sensors
+    ${CMAKE_CURRENT_SOURCE_DIR}/storage
+    ${CMAKE_CURRENT_SOURCE_DIR}/pipeline
+    ${CMAKE_CURRENT_SOURCE_DIR}/input
+)
 
 # Android 15 and newer expect native libraries aligned to a 16 KB page, and warn
 # on install otherwise. The platform and libc++ binaries already are; this is
