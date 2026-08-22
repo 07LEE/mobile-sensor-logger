@@ -162,10 +162,15 @@ void ProPanel::Draw(
     row_top = row_bottom - kRowGap;
   }
 
-  // Close button at the bottom.
-  const float close_top = kDialogBottom + 0.08f;
-  const float close_bottom = close_top - kBtnH;
+  // Close button at the bottom, its own bottom margin measured up from the
+  // dialog's edge rather than its top measured down from it — the previous
+  // version put the top 0.08 above the dialog bottom and then dropped a full
+  // kBtnH (0.10) below that, so the button's bottom edge sat 0.02 outside
+  // the dialog box.
+  constexpr float kCloseBottomMargin = 0.06f;
   constexpr float kCloseW = 0.40f;
+  const float close_bottom = kDialogBottom + kCloseBottomMargin;
+  const float close_top = close_bottom + kBtnH;
 
   close_.left = (-kCloseW * 0.5f + 1.0f) * 0.5f * vp_w;
   close_.right = (kCloseW * 0.5f + 1.0f) * 0.5f * vp_w;
