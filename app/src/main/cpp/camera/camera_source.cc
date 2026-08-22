@@ -652,6 +652,18 @@ bool CameraSource::StartSession() {
   ACaptureRequest_setEntry_u8(request_, ACAMERA_LENS_OPTICAL_STABILIZATION_MODE,
                               1, &optical_stabilization);
 
+  // Left alone, TEMPLATE_PREVIEW's default target range is flexible enough to
+  // run below the sensor's ceiling in a dim room, which makes the frame count
+  // a fixed recording time produces unpredictable. Pinning min and max to the
+  // same value forces one rate for the whole session. It does nothing for
+  // exposure: that is locked separately by LockExposureAndFocus and does not
+  // move again once a recording starts, whatever fps is set to.
+  if (fixed_fps_ > 0) {
+    const int32_t fps_range[2] = {fixed_fps_, fixed_fps_};
+    ACaptureRequest_setEntry_i32(request_, ACAMERA_CONTROL_AE_TARGET_FPS_RANGE,
+                                 2, fps_range);
+  }
+
   ACameraCaptureSession_stateCallbacks state{};
   state.context = this;
   state.onReady = OnSessionReady;
@@ -697,6 +709,8 @@ std::string CameraSource::NextRearCameraId(const std::string& id) const {
 
 bool CameraSource::Start(const CaptureConfig& config) {
   if (session_ != nullptr) return true;
+
+  fixed_fps_ = config.fixed_fps;
 
   manager_ = ACameraManager_create();
   if (manager_ == nullptr) return false;

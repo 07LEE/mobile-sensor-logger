@@ -164,6 +164,7 @@ class CameraSource {
   bool locked_ = false;
   int64_t min_exposure_ns_ = 0;
   int64_t max_exposure_ns_ = 0;
+  int32_t fixed_fps_ = 0;
   int32_t min_sensitivity_ = 0;
   int32_t max_sensitivity_ = 0;
   float hyperfocal_diopters_ = 0.0f;

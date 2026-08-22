@@ -113,6 +113,23 @@ bool CaptureConfig::Load(const std::string& directory) {
                               value.c_str());
         }
       }
+    } else if (key == "fps") {
+      if (value == "auto") {
+        fixed_fps = 0;
+      } else {
+        const int parsed = std::atoi(value.c_str());
+        // Above the sensor's own ceiling at full resolution the request would
+        // just be refused, but there is no characteristic read here to check
+        // it against, so this only catches the typos, not the too-high ones.
+        if (parsed > 0 && parsed <= 240) {
+          fixed_fps = parsed;
+        } else {
+          __android_log_print(ANDROID_LOG_WARN, kTag,
+                              "capture.conf: fps wants auto or a positive "
+                              "number, got '%s'",
+                              value.c_str());
+        }
+      }
     } else if (key == "retention") {
       if (value == "all") {
         retention = Retention::kAll;
@@ -154,11 +171,19 @@ std::string CaptureConfig::Describe() const {
     std::snprintf(shutter, sizeof(shutter), "auto");
   }
 
-  char buffer[192];
-  std::snprintf(buffer, sizeof(buffer),
-                "%s %s lens %s shift %.3f residual %.3f shutter %s mains %d",
-                size, retention == Retention::kAll ? "all" : "sharpest",
-                lens_name, min_shift, min_residual, shutter, mains_hz);
+  char fps[16];
+  if (fixed_fps > 0) {
+    std::snprintf(fps, sizeof(fps), "%d", fixed_fps);
+  } else {
+    std::snprintf(fps, sizeof(fps), "auto");
+  }
+
+  char buffer[224];
+  std::snprintf(
+      buffer, sizeof(buffer),
+      "%s %s lens %s shift %.3f residual %.3f shutter %s mains %d fps %s",
+      size, retention == Retention::kAll ? "all" : "sharpest", lens_name,
+      min_shift, min_residual, shutter, mains_hz, fps);
   return buffer;
 }
 

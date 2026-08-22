@@ -28,6 +28,7 @@ enum class Retention {
 //   residual  = 0.06        how much of it may stop matching
 //   shutter   = auto | 1/120  longest exposure allowed once locked
 //   mains     = 60 | 50 | off how often the lights pulse, for flicker
+//   fps       = auto | 30    pins the frame rate instead of letting AE pick
 //
 // Anything missing keeps its default. An unreadable file is not an error: the
 // defaults are a working configuration, and a capture that refused to start
@@ -92,6 +93,21 @@ struct CaptureConfig {
   // the tested device, 1/30 and 1/24, are both exact multiples — which is
   // precisely the protection that setting the exposure by hand gives up.
   int32_t mains_hz = 60;
+
+  // A frame rate to hold the camera to, or 0 to leave it to the platform's own
+  // choice for TEMPLATE_PREVIEW at this resolution.
+  //
+  // Nothing else here asks for a specific rate, and that default has turned
+  // out to be a range flexible enough to drop well below the sensor's ceiling
+  // in a dim room. A frame rate that varies with the room is a frame rate a
+  // capture cannot be planned around, and the number of frames a fixed
+  // recording time will produce becomes a guess instead of an arithmetic.
+  //
+  // This is only about the rate. Exposure is a separate decision — `shutter`
+  // caps it, or it is whatever LockExposureAndFocus finds already metered —
+  // and once the camera is locked for a recording that decision does not
+  // move again regardless of what fps is set to.
+  int32_t fixed_fps = 0;
 
   // Loads from `<directory>/capture.conf`. Returns false if there was no file,
   // which leaves every field at its default.
