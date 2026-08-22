@@ -534,11 +534,16 @@ void ToggleRecording(AppState* state) {
     state->recorder.Stop(end_loc);
     StopRecordingService(state->app);
     state->camera.UnlockExposureAndFocus();
-    __android_log_print(ANDROID_LOG_INFO, kTag,
-                        "stopped: %lld written, %lld considered, %lld dropped",
-                        (long long)state->recorder.written_frames(),
-                        (long long)state->recorder.considered_frames(),
-                        (long long)state->recorder.dropped_frames());
+    __android_log_print(
+        ANDROID_LOG_INFO, kTag,
+        "stopped: %lld written, %lld considered, %lld dropped, %lld lost "
+        "upstream (of %lld camera captures)",
+        (long long)state->recorder.written_frames(),
+        (long long)state->recorder.considered_frames(),
+        (long long)state->recorder.dropped_frames(),
+        (long long)(state->recorder.camera_completed_captures() -
+                    state->recorder.considered_frames()),
+        (long long)state->recorder.camera_completed_captures());
     return;
   }
 

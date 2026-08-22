@@ -98,6 +98,16 @@ class SessionRecorder {
   int64_t dropped_frames() const { return writer_.dropped(); }
   int64_t imu_samples() const { return imu_samples_; }
 
+  // Every frame the camera finished capturing, counted from its metadata
+  // callback rather than from the image path. AcquireFrame keeps only the
+  // newest buffered image and lets older ones go when the app falls behind
+  // (camera_source.cc), so considered_frames() alone cannot tell a clean
+  // capture from one that is quietly losing frames upstream of Record().
+  // This can, because the metadata callback has nothing to fall behind on.
+  int64_t camera_completed_captures() const {
+    return camera_completed_captures_;
+  }
+
   // Bytes of image written, and how long the session has been running by the
   // camera's clock. Between them they say how fast the disk is filling, which
   // is the number that decides how long a capture can go on.
@@ -154,6 +164,7 @@ class SessionRecorder {
   std::atomic<int64_t> written_bytes_{0};
   std::atomic<int64_t> frames_without_image_{0};
   int64_t considered_frames_ = 0;
+  int64_t camera_completed_captures_ = 0;
   int64_t imu_samples_ = 0;
 };
 

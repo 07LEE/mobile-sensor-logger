@@ -147,6 +147,7 @@ bool SessionRecorder::Start(const std::string& root,
   written_frames_ = 0;
   written_bytes_ = 0;
   considered_frames_ = 0;
+  camera_completed_captures_ = 0;
   frames_without_image_ = 0;
   imu_samples_ = 0;
 
@@ -213,6 +214,8 @@ void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
 void SessionRecorder::RecordCaptureResults(
     const std::vector<CaptureResult>& results) {
   if (!recording_ || results.empty()) return;
+
+  camera_completed_captures_ += static_cast<int64_t>(results.size());
 
   for (const CaptureResult& result : results) {
     capture_ << result.timestamp_ns << ',' << result.exposure_ns << ','
@@ -350,6 +353,14 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << "  \"frames_without_image\": " << frames_without_image_.load()
            << ",\n"
            << "  \"dropped_frames\": " << writer_.dropped() << ",\n"
+           << "  \"camera_completed_captures\": " << camera_completed_captures_
+           << ",\n"
+           << "  \"frames_lost_upstream\": "
+           << (camera_completed_captures_ - considered_frames_) << ",\n"
+           << "  \"frames_lost_upstream_note\": \"captures the camera "
+              "finished but Record() never saw, because AcquireFrame kept a "
+              "newer image instead; not counted by dropped_frames, which is "
+              "the writer queue only\",\n"
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
            << "  \"retention\": \""
            << (retention_ == Retention::kAll ? "all" : "sharpest") << "\",\n"
