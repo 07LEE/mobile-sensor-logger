@@ -22,6 +22,7 @@ add_library(sensor_logger SHARED
     pipeline/frame_motion.cc
     pipeline/pending_frame.cc
     pipeline/sharpness.cc
+    ui/gl_quad.cc
     ui/preview_renderer.cc
     ui/ui_button.cc
     ui/sessions_overlay.cc

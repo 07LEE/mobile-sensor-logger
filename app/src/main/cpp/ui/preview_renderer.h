@@ -85,8 +85,6 @@ class PreviewRenderer {
   int ItemDeleteOverlayTouched(float x, float y) const;
 
  private:
-  void DrawQuad(GLuint program, float x0, float y0, float x1, float y1,
-                const float* uvs);
   void RasterizeText(const std::vector<std::string>& lines, int columns);
 
   GLuint camera_program_ = 0;

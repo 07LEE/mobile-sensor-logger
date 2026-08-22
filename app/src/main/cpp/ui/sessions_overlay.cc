@@ -2,37 +2,9 @@
 
 #include <cstring>
 
+#include "gl_quad.h"
+
 namespace sensor_logger {
-
-namespace {
-
-constexpr int kGlyphHeight = 7;
-constexpr int kCellWidth = 6;
-constexpr int kCellHeight = 8;
-constexpr int kTextColumns = 40;
-constexpr int kTextRows = 8;
-
-void DrawQuadHelper(GLuint program, GLuint vbo, float x0, float y0, float x1,
-                    float y1, const float* uvs) {
-  const float vertices[16] = {
-      x0, y0, uvs[0], uvs[1], x1, y0, uvs[2], uvs[3],
-      x0, y1, uvs[4], uvs[5], x1, y1, uvs[6], uvs[7],
-  };
-
-  glUseProgram(program);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-
-  glEnableVertexAttribArray(0);
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
-  glEnableVertexAttribArray(1);
-  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                        reinterpret_cast<void*>(2 * sizeof(float)));
-
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-}
-
-}  // namespace
 
 bool SessionsOverlay::CloseTouched(float x, float y) const {
   return x >= close_button_left_ && x <= close_button_right_ &&
@@ -73,7 +45,7 @@ void SessionsOverlay::Draw(
   // Dark semi-transparent background overlay covering full screen
   glBindTexture(GL_TEXTURE_2D, white_texture);
   glUniform4f(quad_color_location, 0.02f, 0.02f, 0.04f, 0.92f);
-  DrawQuadHelper(quad_program, vbo, -1.0f, -1.0f, 1.0f, 1.0f, kFullUvs);
+  DrawQuad(quad_program, vbo, -1.0f, -1.0f, 1.0f, 1.0f, kFullUvs);
 
   // Inner dialog box
   constexpr float kDialogTopFrac = 0.08f;
@@ -84,7 +56,7 @@ void SessionsOverlay::Draw(
   const float d_right = 0.92f;
 
   glUniform4f(quad_color_location, 0.12f, 0.14f, 0.20f, 0.98f);
-  DrawQuadHelper(quad_program, vbo, d_left, d_bottom, d_right, d_top, kFullUvs);
+  DrawQuad(quad_program, vbo, d_left, d_bottom, d_right, d_top, kFullUvs);
 
   item_delete_rects_.clear();
 
@@ -104,7 +76,7 @@ void SessionsOverlay::Draw(
   const float h_bottom = h_top - 2.0f * h_height_px / vp_h;
 
   glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, 1.0f);
-  DrawQuadHelper(quad_program, vbo, -0.84f, h_bottom, 0.84f, h_top, h_uvs);
+  DrawQuad(quad_program, vbo, -0.84f, h_bottom, 0.84f, h_top, h_uvs);
 
   if (sessions.empty()) {
     std::vector<std::string> empty_msg = {"NO SESSIONS FOUND"};
@@ -114,7 +86,7 @@ void SessionsOverlay::Draw(
     const float e_uvs[8] = {0.0f, h_row, e_used, h_row, 0.0f, 0.0f, e_used, 0.0f};
     const float e_top = h_bottom - 0.10f;
     const float e_bottom = e_top - 2.0f * h_height_px / vp_h;
-    DrawQuadHelper(quad_program, vbo, -0.80f, e_bottom, 0.80f, e_top, e_uvs);
+    DrawQuad(quad_program, vbo, -0.80f, e_bottom, 0.80f, e_top, e_uvs);
   } else {
     // Render individual session rows
     const int max_show = static_cast<int>(sessions.size()) < 8 ? static_cast<int>(sessions.size()) : 8;
@@ -150,7 +122,7 @@ void SessionsOverlay::Draw(
       const float s_cy = (row_top + row_bottom) * 0.5f;
 
       glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, 1.0f);
-      DrawQuadHelper(quad_program, vbo, s_left, s_cy - s_lh * 0.5f, s_left + s_lw, s_cy + s_lh * 0.5f, s_uvs);
+      DrawQuad(quad_program, vbo, s_left, s_cy - s_lh * 0.5f, s_left + s_lw, s_cy + s_lh * 0.5f, s_uvs);
 
       // Draw individual delete button next to session item
       const bool is_pending = (pending_delete_index == i);
@@ -171,7 +143,7 @@ void SessionsOverlay::Draw(
       } else {
         glUniform4f(quad_color_location, 0.45f, 0.18f, 0.18f, 0.90f);
       }
-      DrawQuadHelper(quad_program, vbo, btn_left, row_bottom, btn_right, row_top, kFullUvs);
+      DrawQuad(quad_program, vbo, btn_left, row_bottom, btn_right, row_top, kFullUvs);
 
       const int b_cols = static_cast<int>(btn_label.size());
       rasterize_text_fn({btn_label}, b_cols);
@@ -191,7 +163,7 @@ void SessionsOverlay::Draw(
       const float b_cy = (row_top + row_bottom) * 0.5f;
 
       glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, 1.0f);
-      DrawQuadHelper(quad_program, vbo, b_cx - b_lw * 0.5f, b_cy - b_lh * 0.5f,
+      DrawQuad(quad_program, vbo, b_cx - b_lw * 0.5f, b_cy - b_lh * 0.5f,
                      b_cx + b_lw * 0.5f, b_cy + b_lh * 0.5f, b_uvs);
     }
   }
@@ -212,7 +184,7 @@ void SessionsOverlay::Draw(
 
   glBindTexture(GL_TEXTURE_2D, white_texture);
   glUniform4f(quad_color_location, 0.25f, 0.28f, 0.35f, 1.0f);
-  DrawQuadHelper(quad_program, vbo, close_left, close_bottom, close_right, close_top, kFullUvs);
+  DrawQuad(quad_program, vbo, close_left, close_bottom, close_right, close_top, kFullUvs);
 
   rasterize_text_fn({"[ CLOSE ]"}, 9);
   glBindTexture(GL_TEXTURE_2D, text_texture);
@@ -233,7 +205,7 @@ void SessionsOverlay::Draw(
   const float c_cy = (close_top + close_bottom) * 0.5f;
 
   glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, 1.0f);
-  DrawQuadHelper(quad_program, vbo, c_cx - c_lw * 0.5f, c_cy - c_lh * 0.5f,
+  DrawQuad(quad_program, vbo, c_cx - c_lw * 0.5f, c_cy - c_lh * 0.5f,
                  c_cx + c_lw * 0.5f, c_cy + c_lh * 0.5f, c_uvs);
 
   glDisable(GL_BLEND);

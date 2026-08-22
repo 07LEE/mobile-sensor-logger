@@ -1,36 +1,8 @@
 #include "ui_button.h"
 
+#include "gl_quad.h"
+
 namespace sensor_logger {
-
-namespace {
-
-constexpr int kGlyphHeight = 7;
-constexpr int kCellWidth = 6;
-constexpr int kCellHeight = 8;
-constexpr int kTextColumns = 40;
-constexpr int kTextRows = 8;
-
-void DrawQuadHelper(GLuint program, GLuint vbo, float x0, float y0, float x1,
-                    float y1, const float* uvs) {
-  const float vertices[16] = {
-      x0, y0, uvs[0], uvs[1], x1, y0, uvs[2], uvs[3],
-      x0, y1, uvs[4], uvs[5], x1, y1, uvs[6], uvs[7],
-  };
-
-  glUseProgram(program);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-
-  glEnableVertexAttribArray(0);
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
-  glEnableVertexAttribArray(1);
-  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                        reinterpret_cast<void*>(2 * sizeof(float)));
-
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-}
-
-}  // namespace
 
 void UiButton::Draw(GLuint quad_program, GLuint white_texture, GLuint text_texture,
                     GLint quad_color_location, GLuint vbo, const std::string& label,
@@ -73,7 +45,7 @@ void UiButton::Draw(GLuint quad_program, GLuint white_texture, GLuint text_textu
   } else {
     glUniform4f(quad_color_location, 0.09f, 0.09f, 0.09f, 0.95f);
   }
-  DrawQuadHelper(quad_program, vbo, left, bottom, right, top, kFullUvs);
+  DrawQuad(quad_program, vbo, left, bottom, right, top, kFullUvs);
 
   // 2. Draw Text Quad Centered inside Button using exact original formula
   const int columns = static_cast<int>(label.size()) + 2;
@@ -95,7 +67,7 @@ void UiButton::Draw(GLuint quad_program, GLuint white_texture, GLuint text_textu
 
   glUniform4f(quad_color_location, enabled ? 1.0f : 0.45f,
               enabled ? 1.0f : 0.45f, enabled ? 1.0f : 0.45f, 1.0f);
-  DrawQuadHelper(quad_program, vbo, centre_x - label_width * 0.5f,
+  DrawQuad(quad_program, vbo, centre_x - label_width * 0.5f,
                  label_centre - label_height * 0.5f, centre_x + label_width * 0.5f,
                  label_centre + label_height * 0.5f, label_uvs);
 

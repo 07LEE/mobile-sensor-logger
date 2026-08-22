@@ -4,6 +4,8 @@
 
 #include <cstring>
 
+#include "gl_quad.h"
+
 namespace sensor_logger {
 namespace {
 
@@ -12,9 +14,6 @@ constexpr char kTag[] = "sensor_logger";
 // Columns of a five-by-seven glyph, least significant bit at the top row. Only
 // the characters the status lines use are here; anything else draws as a blank.
 constexpr int kGlyphWidth = 5;
-constexpr int kGlyphHeight = 7;
-constexpr int kCellWidth = 6;  // one column of spacing
-constexpr int kCellHeight = 8;
 
 struct Glyph {
   char code;
@@ -68,8 +67,6 @@ constexpr Glyph kFont[] = {
 
 // The readout is rasterised into a fixed grid so the texture never has to be
 // reallocated; lines longer than this are cut off.
-constexpr int kTextColumns = 40;
-constexpr int kTextRows = 8;
 constexpr int kTextWidth = kTextColumns * kCellWidth;
 constexpr int kTextHeight = kTextRows * kCellHeight;
 
@@ -246,26 +243,6 @@ void PreviewRenderer::SetViewport(int width, int height) {
   glViewport(0, 0, width, height);
 }
 
-void PreviewRenderer::DrawQuad(GLuint program, float x0, float y0, float x1,
-                               float y1, const float* uvs) {
-  const float vertices[16] = {
-      x0, y0, uvs[0], uvs[1], x1, y0, uvs[2], uvs[3],
-      x0, y1, uvs[4], uvs[5], x1, y1, uvs[6], uvs[7],
-  };
-
-  glUseProgram(program);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-  glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-
-  glEnableVertexAttribArray(0);
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
-  glEnableVertexAttribArray(1);
-  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                        reinterpret_cast<void*>(2 * sizeof(float)));
-
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-}
-
 bool PreviewRenderer::UploadCamera(const CameraImageView& image) {
   if (!image.valid || image.planes[0].data == nullptr) return false;
 
@@ -423,7 +400,7 @@ void PreviewRenderer::DrawCamera(int32_t sensor_orientation,
   glUniform1i(glGetUniformLocation(camera_program_, "u_swap_chroma"),
               swap_chroma_ ? 1 : 0);
 
-  DrawQuad(camera_program_, -half_width, bottom, half_width, top, uvs);
+  DrawQuad(camera_program_, vbo_, -half_width, bottom, half_width, top, uvs);
 }
 
 bool PreviewRenderer::LensButtonContains(float x, float y) const {
@@ -573,11 +550,11 @@ float PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
   // unreadable, which is exactly the scene a capture is usually pointed at.
   glBindTexture(GL_TEXTURE_2D, white_texture_);
   glUniform4f(quad_color_location_, 0.0f, 0.0f, 0.0f, 0.55f);
-  DrawQuad(quad_program_, -1.0f, panel_bottom, 1.0f, panel_top, kFullUvs);
+  DrawQuad(quad_program_, vbo_, -1.0f, panel_bottom, 1.0f, panel_top, kFullUvs);
 
   RasterizeText(lines, columns);
   glUniform4f(quad_color_location_, 1.0f, 1.0f, 1.0f, 1.0f);
-  DrawQuad(quad_program_, left, panel_bottom, right, panel_top, kFullUvs);
+  DrawQuad(quad_program_, vbo_, left, panel_bottom, right, panel_top, kFullUvs);
 
   // A marker that reads at arm's length without focusing on the text.
   // On the first line, at its right edge, so it reads as part of the state
@@ -594,7 +571,7 @@ float PreviewRenderer::DrawStatus(const std::vector<std::string>& lines,
   } else {
     glUniform4f(quad_color_location_, 0.3f, 0.3f, 0.3f, 1.0f);
   }
-  DrawQuad(quad_program_, right - marker_w, line_bottom, right,
+  DrawQuad(quad_program_, vbo_, right - marker_w, line_bottom, right,
            line_bottom + marker_h, kFullUvs);
 
   glDisable(GL_BLEND);
