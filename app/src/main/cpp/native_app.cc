@@ -91,6 +91,12 @@ struct AppState {
   bool sessions_overlay_visible = false;
   int pending_delete_index = -1;
   bool permission_granted = false;
+
+  // The exact list the sessions overlay was last drawn from. Delete taps must
+  // resolve against this same list rather than a fresh directory read: readdir
+  // order is not guaranteed stable between calls, so a second read could put a
+  // different session at the tapped index and delete the wrong one.
+  std::vector<sensor_logger::SessionItem> cached_sessions;
 };
 
 // Runtime camera permission, requested through JNI because there is no native
@@ -574,9 +580,9 @@ extern "C" void android_main(android_app* app) {
           int touched_idx = state.preview.ItemDeleteOverlayTouched(input.x, input.y);
           if (touched_idx >= 0) {
             if (state.pending_delete_index == touched_idx) {
-              const auto sessions = SessionRecorder::GetSessions(SessionRoot(state.app));
-              if (touched_idx < static_cast<int>(sessions.size())) {
-                SessionRecorder::DeleteSessionPath(sessions[static_cast<size_t>(touched_idx)].full_path);
+              if (touched_idx < static_cast<int>(state.cached_sessions.size())) {
+                SessionRecorder::DeleteSessionPath(
+                    state.cached_sessions[static_cast<size_t>(touched_idx)].full_path);
               }
               state.pending_delete_index = -1;
             } else {
@@ -677,9 +683,8 @@ extern "C" void android_main(android_app* app) {
     }
 
     if (state.sessions_overlay_visible) {
-      const auto sessions =
-          SessionRecorder::GetSessions(SessionRoot(state.app));
-      state.preview.DrawSessionsOverlay(sessions, state.pending_delete_index);
+      state.cached_sessions = SessionRecorder::GetSessions(SessionRoot(state.app));
+      state.preview.DrawSessionsOverlay(state.cached_sessions, state.pending_delete_index);
     }
 
     eglSwapBuffers(state.display, state.surface);
