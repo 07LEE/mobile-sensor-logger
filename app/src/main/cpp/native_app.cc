@@ -709,6 +709,34 @@ void CycleFps(AppState* state) {
   state->last_timestamp_ns = 0;
 }
 
+// Puts shutter, fps and mains back to their defaults in one tap, rather than
+// cycling each one back around individually — shutter alone can be five taps
+// from auto. What this is for is not stranding a test value (a shutter cap
+// or a pinned fps tried out while figuring out a scene) in capture.conf,
+// where it would silently carry into a take that never meant to use it.
+void ResetProSettings(AppState* state) {
+  if (state->recorder.is_recording()) {
+    LogInfo("not resetting pro settings while recording; stop first");
+    return;
+  }
+
+  const bool fps_changed = state->config.fixed_fps != 0;
+
+  state->config.max_exposure_ns = 0;
+  state->config.fixed_fps = 0;
+  state->config.mains_hz = 60;
+  state->config.Save(FilesRoot(state->app));
+
+  if (fps_changed) {
+    state->camera.Stop();
+    if (!state->camera.Start(state->config)) {
+      LogError("could not restart camera after pro reset");
+      return;
+    }
+    state->last_timestamp_ns = 0;
+  }
+}
+
 // Pins the current metered result so a recording started later locks onto it
 // rather than onto whatever the phone happens to be pointed at when the
 // record key is pressed — tapping again clears the pin.
@@ -974,6 +1002,8 @@ extern "C" void android_main(android_app* app) {
           CycleFps(&state);
         } else if (state.preview.ProPanelMainsContains(input.x, input.y)) {
           CycleMains(&state);
+        } else if (state.preview.ProPanelResetContains(input.x, input.y)) {
+          ResetProSettings(&state);
         }
       } else if (state.sessions_overlay_visible) {
         if (state.preview.CloseOverlayContains(input.x, input.y)) {
@@ -1112,8 +1142,9 @@ extern "C" void android_main(android_app* app) {
 
     // Ordered by how often each gets touched around a recording rather than
     // alphabetically or by when it was added: the lock is checked before
-    // nearly every take, retention and lens far less often, and sessions is
-    // an occasional housekeeping visit — so it sits furthest from a thumb
+    // nearly every take, retention and lens far less often, pro rarer still —
+    // tuned once for a scene rather than every take — and sessions is an
+    // occasional housekeeping visit, so it sits furthest from a thumb
     // reaching for the others in a hurry.
     if (state.preview_visible) {
       state.preview.DrawCamera(state.camera.sensor_orientation(), 0.62f, 0.03f);
@@ -1136,11 +1167,11 @@ extern "C" void android_main(android_app* app) {
                                      !state.recorder.is_recording());
         btn_pos += kOverlayBtnH + kOverlayGap;
       }
-      state.preview.DrawSessionsButton("SESSIONS", btn_pos,
-                                       !state.recorder.is_recording());
-      btn_pos += kOverlayBtnH + kOverlayGap;
       state.preview.DrawProButton("PRO", btn_pos,
                                   !state.recorder.is_recording());
+      btn_pos += kOverlayBtnH + kOverlayGap;
+      state.preview.DrawSessionsButton("SESSIONS", btn_pos,
+                                       !state.recorder.is_recording());
     } else {
 
       constexpr int kColumns = 32;
@@ -1164,11 +1195,11 @@ extern "C" void android_main(android_app* app) {
                                      !state.recorder.is_recording());
         bottom += kBtnHeight + kGap;
       }
-      state.preview.DrawSessionsButton("SESSIONS", bottom + kGap,
-                                       !state.recorder.is_recording());
-      bottom += kBtnHeight + kGap;
       state.preview.DrawProButton("PRO", bottom + kGap,
                                   !state.recorder.is_recording());
+      bottom += kBtnHeight + kGap;
+      state.preview.DrawSessionsButton("SESSIONS", bottom + kGap,
+                                       !state.recorder.is_recording());
     }
 
     if (state.sessions_overlay_visible) {

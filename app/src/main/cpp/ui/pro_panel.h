@@ -35,6 +35,7 @@ class ProPanel {
   bool ShutterTouched(float x, float y) const;
   bool FpsTouched(float x, float y) const;
   bool MainsTouched(float x, float y) const;
+  bool ResetTouched(float x, float y) const;
 
  private:
   struct Rect {
@@ -50,6 +51,7 @@ class ProPanel {
   Rect shutter_;
   Rect fps_;
   Rect mains_;
+  Rect reset_;
 };
 
 }  // namespace sensor_logger

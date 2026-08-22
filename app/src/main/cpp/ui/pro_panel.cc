@@ -24,6 +24,10 @@ bool ProPanel::MainsTouched(float x, float y) const {
   return Contains(mains_, x, y);
 }
 
+bool ProPanel::ResetTouched(float x, float y) const {
+  return Contains(reset_, x, y);
+}
+
 void ProPanel::Draw(
     GLuint quad_program, GLuint white_texture, GLuint text_texture,
     GLint quad_color_location, GLuint vbo, const std::string& shutter_label,
@@ -36,13 +40,13 @@ void ProPanel::Draw(
   const float vp_w = static_cast<float>(viewport_width);
   const float vp_h = static_cast<float>(viewport_height);
 
-  constexpr float kDialogTop = 0.50f;
-  constexpr float kDialogBottom = -0.50f;
+  constexpr float kDialogTop = 0.62f;
+  constexpr float kDialogBottom = -0.62f;
   constexpr float kDialogLeft = -0.85f;
   constexpr float kDialogRight = 0.85f;
 
-  constexpr float kRowH = 0.14f;
-  constexpr float kRowGap = 0.035f;
+  constexpr float kRowH = 0.12f;
+  constexpr float kRowGap = 0.025f;
   constexpr float kBtnH = 0.10f;
 
   glEnable(GL_BLEND);
@@ -119,6 +123,36 @@ void ProPanel::Draw(
                     row.label, cols, 26, vp_w * (kDialogRight - kDialogLeft - 0.06f) * 0.5f,
                     vp_h * kRowH * 0.5f, 0.92f, 0.60f, LabelAnchor::kLeft,
                     kDialogLeft + 0.06f, cy, vp_w, vp_h, 1.0f, 1.0f, 1.0f, 1.0f,
+                    rasterize_text_fn);
+
+    row_top = row_bottom - kRowGap;
+  }
+
+  // Reset row: every value above back to its default in one tap, rather than
+  // cycling each one back around individually — shutter alone can be five
+  // taps away from auto. Set apart by colour and a centered label, since it
+  // is an action rather than a value being shown.
+  {
+    const float row_bottom = row_top - kRowH;
+
+    Rect px;
+    px.left = (kDialogLeft + 0.03f + 1.0f) * 0.5f * vp_w;
+    px.right = (kDialogRight - 0.03f + 1.0f) * 0.5f * vp_w;
+    px.top = (1.0f - row_top) * 0.5f * vp_h;
+    px.bottom = (1.0f - row_bottom) * 0.5f * vp_h;
+    reset_ = px;
+
+    glBindTexture(GL_TEXTURE_2D, white_texture);
+    glUniform4f(quad_color_location, 0.35f, 0.20f, 0.16f, 0.95f);
+    DrawQuad(quad_program, vbo, kDialogLeft + 0.03f, row_bottom,
+             kDialogRight - 0.03f, row_top, kFullUvs);
+
+    const float cy = (row_top + row_bottom) * 0.5f;
+    DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
+                    "RESET TO AUTO", 13, 13,
+                    vp_w * (kDialogRight - kDialogLeft - 0.06f) * 0.5f,
+                    vp_h * kRowH * 0.5f, 0.85f, 0.60f, LabelAnchor::kCenter,
+                    0.0f, cy, vp_w, vp_h, 1.0f, 1.0f, 1.0f, 1.0f,
                     rasterize_text_fn);
 
     row_top = row_bottom - kRowGap;

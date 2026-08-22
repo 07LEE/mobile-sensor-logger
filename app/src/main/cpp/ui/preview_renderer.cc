@@ -446,6 +446,10 @@ bool PreviewRenderer::ProPanelMainsContains(float x, float y) const {
   return pro_panel_.MainsTouched(x, y);
 }
 
+bool PreviewRenderer::ProPanelResetContains(float x, float y) const {
+  return pro_panel_.ResetTouched(x, y);
+}
+
 bool PreviewRenderer::CloseOverlayContains(float x, float y) const {
   return sessions_overlay_.CloseTouched(x, y);
 }
