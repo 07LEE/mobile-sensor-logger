@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "camera_image.h"
+#include "pro_panel.h"
 #include "session_item.h"
 #include "sessions_overlay.h"
 #include "ui_button.h"
@@ -85,6 +86,20 @@ class PreviewRenderer {
                       bool pinned);
   bool LockButtonContains(float x, float y) const;
 
+  void DrawProButton(const std::string& label, float top_fraction, bool enabled);
+  bool ProButtonContains(float x, float y) const;
+
+  // The panel opened by the PRO button: shutter, fps and mains, each a row
+  // that cycles its own value on tap. See ProPanel for why these three and
+  // not shift/residual too.
+  void DrawProPanel(const std::string& shutter_label,
+                    const std::string& fps_label,
+                    const std::string& mains_label);
+  bool ProPanelCloseContains(float x, float y) const;
+  bool ProPanelShutterContains(float x, float y) const;
+  bool ProPanelFpsContains(float x, float y) const;
+  bool ProPanelMainsContains(float x, float y) const;
+
   // Render sessions overlay dialog with individual delete buttons and confirm
   // state. `page` is 0-based; how many sessions fit on one is computed from
   // the viewport (see SessionsOverlay::Draw).
@@ -123,7 +138,9 @@ class PreviewRenderer {
   UiButton sessions_button_;
   UiButton retention_button_;
   UiButton lock_button_;
+  UiButton pro_button_;
   SessionsOverlay sessions_overlay_;
+  ProPanel pro_panel_;
 
   std::vector<uint8_t> chroma_pixels_;
 

@@ -426,6 +426,26 @@ bool PreviewRenderer::LockButtonContains(float x, float y) const {
   return lock_button_.Contains(x, y);
 }
 
+bool PreviewRenderer::ProButtonContains(float x, float y) const {
+  return pro_button_.Contains(x, y);
+}
+
+bool PreviewRenderer::ProPanelCloseContains(float x, float y) const {
+  return pro_panel_.CloseTouched(x, y);
+}
+
+bool PreviewRenderer::ProPanelShutterContains(float x, float y) const {
+  return pro_panel_.ShutterTouched(x, y);
+}
+
+bool PreviewRenderer::ProPanelFpsContains(float x, float y) const {
+  return pro_panel_.FpsTouched(x, y);
+}
+
+bool PreviewRenderer::ProPanelMainsContains(float x, float y) const {
+  return pro_panel_.MainsTouched(x, y);
+}
+
 bool PreviewRenderer::CloseOverlayContains(float x, float y) const {
   return sessions_overlay_.CloseTouched(x, y);
 }
@@ -488,6 +508,28 @@ void PreviewRenderer::DrawLockButton(const std::string& label,
       quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
       label, top_fraction, 0.56f, 0.045f, red, green, blue, 0.95f,
       enabled, viewport_width_, viewport_height_,
+      [this](const std::vector<std::string>& lines, int columns) {
+        RasterizeText(lines, columns);
+      });
+}
+
+void PreviewRenderer::DrawProButton(const std::string& label,
+                                    float top_fraction, bool enabled) {
+  pro_button_.Draw(
+      quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
+      label, top_fraction, 0.56f, 0.045f, 0.22f, 0.16f, 0.30f, 0.95f,
+      enabled, viewport_width_, viewport_height_,
+      [this](const std::vector<std::string>& lines, int columns) {
+        RasterizeText(lines, columns);
+      });
+}
+
+void PreviewRenderer::DrawProPanel(const std::string& shutter_label,
+                                   const std::string& fps_label,
+                                   const std::string& mains_label) {
+  pro_panel_.Draw(
+      quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
+      shutter_label, fps_label, mains_label, viewport_width_, viewport_height_,
       [this](const std::vector<std::string>& lines, int columns) {
         RasterizeText(lines, columns);
       });

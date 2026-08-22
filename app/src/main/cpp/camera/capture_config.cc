@@ -148,6 +148,56 @@ bool CaptureConfig::Load(const std::string& directory) {
   return true;
 }
 
+bool CaptureConfig::Save(const std::string& directory) const {
+  const std::string path = directory + "/capture.conf";
+  std::ofstream file(path, std::ios::out | std::ios::trunc);
+  if (!file.is_open()) {
+    __android_log_print(ANDROID_LOG_WARN, kTag, "could not write %s",
+                        path.c_str());
+    return false;
+  }
+
+  if (capture_width > 0) {
+    file << "capture = " << capture_width << "x" << capture_height << "\n";
+  } else {
+    file << "capture = max\n";
+  }
+
+  file << "retention = " << (retention == Retention::kAll ? "all" : "sharpest")
+       << "\n";
+
+  if (lens == Lens::kUltrawide) {
+    file << "lens = ultrawide\n";
+  } else if (lens == Lens::kExplicit) {
+    file << "lens = " << lens_id << "\n";
+  } else {
+    file << "lens = main\n";
+  }
+
+  file << "shift = " << min_shift << "\n";
+  file << "residual = " << min_residual << "\n";
+
+  if (max_exposure_ns > 0) {
+    file << "shutter = 1/" << (1000000000LL / max_exposure_ns) << "\n";
+  } else {
+    file << "shutter = auto\n";
+  }
+
+  if (mains_hz == 0) {
+    file << "mains = off\n";
+  } else {
+    file << "mains = " << mains_hz << "\n";
+  }
+
+  if (fixed_fps > 0) {
+    file << "fps = " << fixed_fps << "\n";
+  } else {
+    file << "fps = auto\n";
+  }
+
+  return file.good();
+}
+
 std::string CaptureConfig::Describe() const {
   const char* lens_name = "main";
   if (lens == Lens::kUltrawide) {

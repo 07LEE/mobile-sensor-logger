@@ -98,6 +98,7 @@ struct AppState {
   // switched off.
   bool preview_visible = false;
   bool sessions_overlay_visible = false;
+  bool pro_panel_visible = false;
   int pending_delete_index = -1;
   int sessions_page = 0;
   bool permission_granted = false;
@@ -623,6 +624,89 @@ void ToggleRetention(AppState* state) {
   state->config.retention = state->config.retention == Retention::kAll
                                 ? Retention::kSharpest
                                 : Retention::kAll;
+  state->config.Save(FilesRoot(state->app));
+}
+
+// Steps the shutter cap through a fixed list of speeds and back to auto.
+// LockExposureAndFocus reads max_exposure_ns fresh at the start of every
+// recording, so unlike fps this needs no camera restart to take effect.
+void CycleShutter(AppState* state) {
+  if (state->recorder.is_recording()) {
+    LogInfo("not changing shutter while recording; stop first");
+    return;
+  }
+
+  // Denominators rather than nanoseconds directly, since that is how the
+  // value reads on the panel and in capture.conf; 0 stands for auto.
+  constexpr int64_t kSteps[] = {0, 1000, 500, 250, 125, 60};
+  constexpr size_t kStepCount = sizeof(kSteps) / sizeof(kSteps[0]);
+
+  int64_t current_denominator =
+      state->config.max_exposure_ns > 0
+          ? 1000000000LL / state->config.max_exposure_ns
+          : 0;
+  size_t index = 0;
+  for (size_t i = 0; i < kStepCount; ++i) {
+    if (kSteps[i] == current_denominator) {
+      index = i;
+      break;
+    }
+  }
+  const int64_t next = kSteps[(index + 1) % kStepCount];
+  state->config.max_exposure_ns = next > 0 ? 1000000000LL / next : 0;
+  state->config.Save(FilesRoot(state->app));
+}
+
+// Steps mains frequency through 60 / 50 / off.
+void CycleMains(AppState* state) {
+  if (state->recorder.is_recording()) {
+    LogInfo("not changing mains while recording; stop first");
+    return;
+  }
+
+  if (state->config.mains_hz == 60) {
+    state->config.mains_hz = 50;
+  } else if (state->config.mains_hz == 50) {
+    state->config.mains_hz = 0;
+  } else {
+    state->config.mains_hz = 60;
+  }
+  state->config.Save(FilesRoot(state->app));
+}
+
+// Steps the fps pin through auto / 30 / 24 / 15.
+//
+// Unlike shutter and mains, this one takes a camera restart to actually take
+// effect: fixed_fps is only read once, in CameraSource::Start, and baked
+// into the repeating request StartSession builds. Saving the new value
+// without restarting would leave the panel and capture.conf agreeing with
+// each other and both disagreeing with the camera still running under the
+// old one.
+void CycleFps(AppState* state) {
+  if (state->recorder.is_recording()) {
+    LogInfo("not changing fps while recording; stop first");
+    return;
+  }
+
+  constexpr int32_t kSteps[] = {0, 30, 24, 15};
+  constexpr size_t kStepCount = sizeof(kSteps) / sizeof(kSteps[0]);
+
+  size_t index = 0;
+  for (size_t i = 0; i < kStepCount; ++i) {
+    if (kSteps[i] == state->config.fixed_fps) {
+      index = i;
+      break;
+    }
+  }
+  state->config.fixed_fps = kSteps[(index + 1) % kStepCount];
+  state->config.Save(FilesRoot(state->app));
+
+  state->camera.Stop();
+  if (!state->camera.Start(state->config)) {
+    LogError("could not restart camera with new fps");
+    return;
+  }
+  state->last_timestamp_ns = 0;
 }
 
 // Pins the current metered result so a recording started later locks onto it
@@ -877,10 +961,21 @@ extern "C" void android_main(android_app* app) {
     if (state.recorder.is_recording()) {
       state.sessions_overlay_visible = false;
       state.pending_delete_index = -1;
+      state.pro_panel_visible = false;
     }
 
     if (input.touched) {
-      if (state.sessions_overlay_visible) {
+      if (state.pro_panel_visible) {
+        if (state.preview.ProPanelCloseContains(input.x, input.y)) {
+          state.pro_panel_visible = false;
+        } else if (state.preview.ProPanelShutterContains(input.x, input.y)) {
+          CycleShutter(&state);
+        } else if (state.preview.ProPanelFpsContains(input.x, input.y)) {
+          CycleFps(&state);
+        } else if (state.preview.ProPanelMainsContains(input.x, input.y)) {
+          CycleMains(&state);
+        }
+      } else if (state.sessions_overlay_visible) {
         if (state.preview.CloseOverlayContains(input.x, input.y)) {
           state.sessions_overlay_visible = false;
           state.pending_delete_index = -1;
@@ -931,6 +1026,10 @@ extern "C" void android_main(android_app* app) {
           ToggleRetention(&state);
         } else if (state.preview.LockButtonContains(input.x, input.y)) {
           ToggleExposurePin(&state);
+        } else if (state.preview.ProButtonContains(input.x, input.y)) {
+          if (!state.recorder.is_recording()) {
+            state.pro_panel_visible = true;
+          }
         }
       }
     }
@@ -986,6 +1085,28 @@ extern "C" void android_main(android_app* app) {
 
     const char* lock_label = state.exposure_pinned ? "PINNED" : "LOCK";
 
+    char shutter_label[32];
+    std::snprintf(shutter_label, sizeof(shutter_label), "SHUTTER: %s",
+                  state.config.max_exposure_ns > 0
+                      ? Shutter(state.config.max_exposure_ns).c_str()
+                      : "AUTO");
+
+    char fps_label[24];
+    if (state.config.fixed_fps > 0) {
+      std::snprintf(fps_label, sizeof(fps_label), "FPS: %d",
+                    state.config.fixed_fps);
+    } else {
+      std::snprintf(fps_label, sizeof(fps_label), "FPS: AUTO");
+    }
+
+    char mains_label[24];
+    if (state.config.mains_hz > 0) {
+      std::snprintf(mains_label, sizeof(mains_label), "MAINS: %dHZ",
+                    state.config.mains_hz);
+    } else {
+      std::snprintf(mains_label, sizeof(mains_label), "MAINS: OFF");
+    }
+
     constexpr float kGap = 0.015f;
     constexpr float kBtnHeight = 0.040f;
 
@@ -1017,13 +1138,16 @@ extern "C" void android_main(android_app* app) {
       }
       state.preview.DrawSessionsButton("SESSIONS", btn_pos,
                                        !state.recorder.is_recording());
+      btn_pos += kOverlayBtnH + kOverlayGap;
+      state.preview.DrawProButton("PRO", btn_pos,
+                                  !state.recorder.is_recording());
     } else {
 
       constexpr int kColumns = 32;
       const std::vector<std::string> lines = StatusLines(state);
       const float block =
           state.preview.StatusHeightFraction(kColumns, (int)lines.size()) +
-          (lens_choice ? kGap + kBtnHeight : 0.0f) + 3 * (kGap + kBtnHeight);
+          (lens_choice ? kGap + kBtnHeight : 0.0f) + 4 * (kGap + kBtnHeight);
       const float top = (1.0f - block) * 0.5f;
 
       float bottom = state.preview.DrawStatus(
@@ -1042,11 +1166,17 @@ extern "C" void android_main(android_app* app) {
       }
       state.preview.DrawSessionsButton("SESSIONS", bottom + kGap,
                                        !state.recorder.is_recording());
+      bottom += kBtnHeight + kGap;
+      state.preview.DrawProButton("PRO", bottom + kGap,
+                                  !state.recorder.is_recording());
     }
 
     if (state.sessions_overlay_visible) {
       state.preview.DrawSessionsOverlay(state.cached_sessions, state.pending_delete_index,
                                         state.sessions_page);
+    }
+    if (state.pro_panel_visible) {
+      state.preview.DrawProPanel(shutter_label, fps_label, mains_label);
     }
 
     eglSwapBuffers(state.display, state.surface);

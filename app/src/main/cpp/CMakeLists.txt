@@ -26,6 +26,7 @@ add_library(sensor_logger SHARED
     ui/preview_renderer.cc
     ui/ui_button.cc
     ui/sessions_overlay.cc
+    ui/pro_panel.cc
     storage/frame_writer.cc
     storage/session_recorder.cc
     sensors/imu_source.cc

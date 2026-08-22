@@ -113,6 +113,14 @@ struct CaptureConfig {
   // which leaves every field at its default.
   bool Load(const std::string& directory);
 
+  // Writes the current values to `<directory>/capture.conf`, in the same
+  // `key = value` form Load reads back. Called after the pro panel changes a
+  // setting, so the change outlives this run instead of reverting to
+  // whatever the file said when it was loaded — the same gap ToggleRetention
+  // and NextLens still have, since neither writes the file either. Returns
+  // false if the file could not be opened for writing.
+  bool Save(const std::string& directory) const;
+
   // For the manifest and the readout, so a capture says how it was taken.
   std::string Describe() const;
 };
