@@ -39,19 +39,45 @@ void SessionsOverlay::Draw(
     const std::function<void(const std::vector<std::string>&, int)>& rasterize_text_fn) {
   if (viewport_width <= 0 || viewport_height <= 0) return;
 
+  const float vp_w = static_cast<float>(viewport_width);
+  const float vp_h = static_cast<float>(viewport_height);
+
+  // Inner dialog box bounds and row metrics, needed below to work out how
+  // many rows actually fit before anything is drawn.
+  constexpr float kDialogTopFrac = 0.08f;
+  constexpr float kDialogBottomFrac = 0.92f;
+  const float d_top = 1.0f - 2.0f * kDialogTopFrac;
+  const float d_bottom = 1.0f - 2.0f * kDialogBottomFrac;
+  const float d_left = -0.92f;
+  const float d_right = 0.92f;
+
+  constexpr float kRowH = 0.07f;
+  constexpr float kRowGap = 0.015f;
+  constexpr float kBtnH = 0.06f;
+
+  // Rows per page, sized to the real viewport instead of a fixed count: a
+  // taller screen shows more sessions per page rather than leaving the
+  // dialog half-empty above a NEXT button nobody needed yet. The header
+  // height below is estimated from its unpaginated length (22 cols) — the
+  // "(n/n)" suffix on a paginated header changes that little enough not to
+  // matter for a row count that gets floored anyway.
+  const float header_scale = (vp_w * 0.84f) / (22.0f * kCellWidth);
+  const float header_height_px = static_cast<float>(kCellHeight) * header_scale;
+  const float rows_top = (d_top - 0.04f) - 2.0f * header_height_px / vp_h - 0.04f;
+  const float rows_bottom = d_bottom + 0.08f + 0.04f;  // clears the footer row
+  int rows_per_page = static_cast<int>((rows_top - rows_bottom + kRowGap) / (kRowH + kRowGap));
+  if (rows_per_page < 1) rows_per_page = 1;
+
   const int total = static_cast<int>(sessions.size());
-  const int page_count = total == 0 ? 1 : (total + kSessionsPerPage - 1) / kSessionsPerPage;
+  const int page_count = total == 0 ? 1 : (total + rows_per_page - 1) / rows_per_page;
   if (page < 0) page = 0;
   if (page > page_count - 1) page = page_count - 1;
-  page_start_ = page * kSessionsPerPage;
-  const int page_end = page_start_ + kSessionsPerPage < total
-                            ? page_start_ + kSessionsPerPage
+  page_start_ = page * rows_per_page;
+  const int page_end = page_start_ + rows_per_page < total
+                            ? page_start_ + rows_per_page
                             : total;
   prev_enabled_ = page > 0;
   next_enabled_ = page < page_count - 1;
-
-  const float vp_w = static_cast<float>(viewport_width);
-  const float vp_h = static_cast<float>(viewport_height);
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -69,13 +95,6 @@ void SessionsOverlay::Draw(
   DrawQuad(quad_program, vbo, -1.0f, -1.0f, 1.0f, 1.0f, kFullUvs);
 
   // Inner dialog box
-  constexpr float kDialogTopFrac = 0.08f;
-  constexpr float kDialogBottomFrac = 0.92f;
-  const float d_top = 1.0f - 2.0f * kDialogTopFrac;
-  const float d_bottom = 1.0f - 2.0f * kDialogBottomFrac;
-  const float d_left = -0.92f;
-  const float d_right = 0.92f;
-
   glUniform4f(quad_color_location, 0.12f, 0.14f, 0.20f, 0.98f);
   DrawQuad(quad_program, vbo, d_left, d_bottom, d_right, d_top, kFullUvs);
 
@@ -119,7 +138,6 @@ void SessionsOverlay::Draw(
   } else {
     // Render this page's session rows
     float current_y = h_bottom - 0.04f;
-    constexpr float kRowH = 0.07f;
 
     for (int i = page_start_; i < page_end; ++i) {
       const auto& sess = sessions[static_cast<size_t>(i)];
@@ -172,7 +190,6 @@ void SessionsOverlay::Draw(
   }
 
   // Close button at bottom center; flanked by PREV/NEXT once paginated.
-  constexpr float kBtnH = 0.06f;
   constexpr float kCloseWSingle = 0.50f;
   constexpr float kCloseWPaged = 0.34f;
   constexpr float kSideBtnW = 0.32f;

@@ -20,16 +20,15 @@ class SessionsOverlay {
     float bottom = 0.0f;
   };
 
-  // Rows per page. More than this many sessions and the list pages instead of
-  // trying to shrink rows to fit or scroll: every touch target stays exactly
-  // as tappable as it is on a single-page list.
-  static constexpr int kSessionsPerPage = 8;
-
   SessionsOverlay() = default;
 
   // `page` is 0-based and clamped internally to the valid range for
   // `sessions.size()`, so the caller does not have to re-derive the page
-  // count just to keep it in bounds.
+  // count just to keep it in bounds. Rows per page is computed from the
+  // viewport each Draw call rather than fixed, so more sessions fit on a
+  // taller screen instead of paging earlier than the space requires — every
+  // row stays exactly as tappable as it is on a single-page list, never
+  // shrunk or scrolled to fit more in.
   void Draw(GLuint quad_program, GLuint white_texture, GLuint text_texture,
             GLint quad_color_location, GLuint vbo,
             const std::vector<SessionItem>& sessions,

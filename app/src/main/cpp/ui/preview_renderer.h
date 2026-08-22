@@ -79,7 +79,8 @@ class PreviewRenderer {
   bool SessionsButtonContains(float x, float y) const;
 
   // Render sessions overlay dialog with individual delete buttons and confirm
-  // state. `page` is 0-based; see SessionsOverlay::kSessionsPerPage.
+  // state. `page` is 0-based; how many sessions fit on one is computed from
+  // the viewport (see SessionsOverlay::Draw).
   void DrawSessionsOverlay(const std::vector<SessionItem>& sessions,
                            int pending_delete_index, int page);
   bool CloseOverlayContains(float x, float y) const;
