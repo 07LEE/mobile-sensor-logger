@@ -24,7 +24,13 @@ public class RecordingService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+        // A null Intent is Android redelivering this after the process — service
+        // and native engine together, since they share one process — was killed
+        // and restarted. There is no recording behind that restart for this
+        // notification to represent, and native code calls back in to start the
+        // service again if a recording actually resumes, so stopping here rather
+        // than reposting "background recording active" avoids lying about it.
+        if (intent == null || ACTION_STOP.equals(intent.getAction())) {
             stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();
             return START_NOT_STICKY;
@@ -37,7 +43,11 @@ public class RecordingService extends Service {
             startForeground(NOTIFICATION_ID, notification);
         }
 
-        return START_STICKY;
+        // Not START_STICKY: native code is what decides whether this service
+        // should be running (see ADR 0007), so Android restarting it on its own
+        // after a kill would only recreate the notification with no capture
+        // engine behind it.
+        return START_NOT_STICKY;
     }
 
     @Override
