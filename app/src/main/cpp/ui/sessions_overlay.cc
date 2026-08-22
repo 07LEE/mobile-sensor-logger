@@ -152,7 +152,7 @@ void SessionsOverlay::Draw(
       const float s_cy = (row_top + row_bottom) * 0.5f;
 
       DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
-                      text_buf, s_cols, vp_w * 0.54f, vp_h * kRowH * 0.5f,
+                      text_buf, s_cols, s_cols, vp_w * 0.54f, vp_h * kRowH * 0.5f,
                       0.95f, 0.70f, LabelAnchor::kLeft, -0.88f, s_cy, vp_w,
                       vp_h, 1.0f, 1.0f, 1.0f, 1.0f, rasterize_text_fn);
 
@@ -182,7 +182,7 @@ void SessionsOverlay::Draw(
       const float b_cy = (row_top + row_bottom) * 0.5f;
 
       DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
-                      btn_label, b_cols, vp_w * (btn_right - btn_left) * 0.5f,
+                      btn_label, b_cols, b_cols, vp_w * (btn_right - btn_left) * 0.5f,
                       vp_h * kRowH * 0.5f, 0.85f, 0.65f, LabelAnchor::kCenter,
                       b_cx, b_cy, vp_w, vp_h, 1.0f, 1.0f, 1.0f, 1.0f,
                       rasterize_text_fn);
@@ -215,7 +215,7 @@ void SessionsOverlay::Draw(
   const float c_cy = (close_top + close_bottom) * 0.5f;
 
   DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
-                  "[ CLOSE ]", 9, vp_w * close_w * 0.5f, c_box_h, 0.85f, 0.65f,
+                  "[ CLOSE ]", 9, 9, vp_w * close_w * 0.5f, c_box_h, 0.85f, 0.65f,
                   LabelAnchor::kCenter, c_cx, c_cy, vp_w, vp_h, 1.0f, 1.0f,
                   1.0f, 1.0f, rasterize_text_fn);
 
@@ -249,12 +249,12 @@ void SessionsOverlay::Draw(
     const float n_cx = (next_left + next_right) * 0.5f;
 
     DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
-                    "< PREV", 6, side_box_w, c_box_h, 0.85f, 0.65f,
+                    "< PREV", 6, 6, side_box_w, c_box_h, 0.85f, 0.65f,
                     LabelAnchor::kCenter, p_cx, c_cy, vp_w, vp_h, 1.0f, 1.0f,
                     1.0f, prev_enabled_ ? 1.0f : 0.45f, rasterize_text_fn);
 
     DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
-                    "NEXT >", 6, side_box_w, c_box_h, 0.85f, 0.65f,
+                    "NEXT >", 6, 6, side_box_w, c_box_h, 0.85f, 0.65f,
                     LabelAnchor::kCenter, n_cx, c_cy, vp_w, vp_h, 1.0f, 1.0f,
                     1.0f, next_enabled_ ? 1.0f : 0.45f, rasterize_text_fn);
   }

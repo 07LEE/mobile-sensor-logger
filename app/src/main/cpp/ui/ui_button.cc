@@ -53,10 +53,19 @@ void UiButton::Draw(GLuint quad_program, GLuint white_texture, GLuint text_textu
   const float label_centre = (top + bottom) * 0.5f;
   const float shade = enabled ? 1.0f : 0.45f;
 
+  // A fixed reference rather than this label's own length: the on-screen
+  // buttons share this Draw(), and sizing each label to its own box made a
+  // short one ("LOCK") render noticeably larger than a long one ("RETENTION
+  // SHARP") in the same row of buttons. 18 covers the longest label any of
+  // them currently uses ("ULTRAWIDE 10.0MM", 16 chars) plus the padding
+  // above; a future label longer than that would be the one to shrink
+  // instead of blowing the others up to match it.
+  constexpr int kScaleColumns = 18;
+
   DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location, label,
-                  columns, button_width_px, height_px, 0.86f, 0.5f,
-                  LabelAnchor::kCenter, centre_x, label_centre, vp_w, vp_h,
-                  shade, shade, shade, 1.0f, rasterize_text_fn);
+                  columns, kScaleColumns, button_width_px, height_px, 0.86f,
+                  0.5f, LabelAnchor::kCenter, centre_x, label_centre, vp_w,
+                  vp_h, shade, shade, shade, 1.0f, rasterize_text_fn);
 
   glDisable(GL_BLEND);
 }

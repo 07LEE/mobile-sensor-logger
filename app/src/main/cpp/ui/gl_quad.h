@@ -33,13 +33,21 @@ enum class LabelAnchor { kCenter, kLeft };
 // scaled by whichever of width or height is tighter to fit within a
 // `box_width_px` x `box_height_px` area — each shrunk first by its own fill
 // fraction (< 1.0) to leave padding — and vertically centered on `center_y`.
+//
+// The width side of that fit is computed against `scale_columns` rather than
+// `columns` itself. Pass `columns` again there for a one-off label sized to
+// its own box; pass a shared constant across a set of buttons instead so a
+// short label ("LOCK") isn't blown up larger than a long one ("RETENTION
+// SHARP") just because it had more width to spare — every label in the set
+// renders at the same glyph size, and a short one simply doesn't fill as
+// much of the box.
 void DrawScaledLabel(GLuint program, GLuint vbo, GLuint text_texture,
                      GLint quad_color_location, const std::string& label,
-                     int columns, float box_width_px, float box_height_px,
-                     float width_fill, float height_fill, LabelAnchor anchor,
-                     float anchor_x, float center_y, float viewport_width,
-                     float viewport_height, float red, float green, float blue,
-                     float alpha,
+                     int columns, int scale_columns, float box_width_px,
+                     float box_height_px, float width_fill, float height_fill,
+                     LabelAnchor anchor, float anchor_x, float center_y,
+                     float viewport_width, float viewport_height, float red,
+                     float green, float blue, float alpha,
                      const std::function<void(const std::vector<std::string>&, int)>&
                          rasterize_text_fn);
 

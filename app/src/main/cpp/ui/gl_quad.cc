@@ -24,11 +24,11 @@ void DrawQuad(GLuint program, GLuint vbo, float x0, float y0, float x1,
 
 void DrawScaledLabel(GLuint program, GLuint vbo, GLuint text_texture,
                      GLint quad_color_location, const std::string& label,
-                     int columns, float box_width_px, float box_height_px,
-                     float width_fill, float height_fill, LabelAnchor anchor,
-                     float anchor_x, float center_y, float viewport_width,
-                     float viewport_height, float red, float green, float blue,
-                     float alpha,
+                     int columns, int scale_columns, float box_width_px,
+                     float box_height_px, float width_fill, float height_fill,
+                     LabelAnchor anchor, float anchor_x, float center_y,
+                     float viewport_width, float viewport_height, float red,
+                     float green, float blue, float alpha,
                      const std::function<void(const std::vector<std::string>&, int)>&
                          rasterize_text_fn) {
   rasterize_text_fn({label}, columns);
@@ -38,7 +38,7 @@ void DrawScaledLabel(GLuint program, GLuint vbo, GLuint text_texture,
   const float row = 1.0f / static_cast<float>(kTextRows);
   const float uvs[8] = {0.0f, row, used, row, 0.0f, 0.0f, used, 0.0f};
 
-  const float scale_w = box_width_px * width_fill / static_cast<float>(columns * kCellWidth);
+  const float scale_w = box_width_px * width_fill / static_cast<float>(scale_columns * kCellWidth);
   const float scale_h = box_height_px * height_fill / static_cast<float>(kGlyphHeight);
   const float scale = scale_w < scale_h ? scale_w : scale_h;
 
