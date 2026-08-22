@@ -27,10 +27,13 @@ path — the capture path is a real camera.
 | --- | --- |
 | **Volume down** | start and stop recording |
 | **Volume up** | show or hide the camera |
-| **The button** | next rear lens; refused while recording |
+| **The lens button** | next rear lens; refused while recording |
+| **The sessions button** | view saved sessions, and delete them individually; refused while recording |
 | **Home** | leave, closing the session cleanly |
 
-Nothing that could lose a capture sits behind a touch.
+Nothing that could lose a capture sits behind a touch. Deleting a session is:
+tap **DEL** next to it, then tap the same button again to confirm — one tap
+never deletes anything, and there is no delete-all.
 
 Pulling and clearing a device:
 
@@ -40,7 +43,9 @@ adb shell run-as com.sensor.logger \
   rm -rf /sdcard/Android/data/com.sensor.logger/files/sessions
 ```
 
-The second needs `run-as`; a plain `rm` is refused under scoped storage.
+The second needs `run-as`; a plain `rm` is refused under scoped storage. For
+removing one session rather than all of them, the sessions button is usually
+easier than pulling and re-pushing.
 
 ## On screen
 
@@ -58,11 +63,14 @@ SHIFT 2/12  DIFF 4/6        movement against the thresholds that keep a frame
 DROP 0 NOIMG 0 IMU 36K      drops should be zero
 
 [ ULTRAWIDE 2.2MM - TAP ]
+[ SESSIONS - TAP ]
 ```
 
 `MIN LEFT` is measured from the rate this capture is actually filling the disk,
 not estimated in advance. `LOCKED` appears once exposure, white balance and
 focus are held; watching them settle is how the moment to start is chosen.
+The lens button only appears on a phone with more than one rear camera; the
+sessions button is always there.
 
 ## Tested on
 
@@ -77,4 +85,3 @@ Hardware profiles and camera parameters for tested devices (Galaxy S25 Ultra, Ga
 | [docs/devices.md](docs/devices.md) | hardware profiles and parameters for tested devices |
 | [docs/roadmap.md](docs/roadmap.md) | planned features and future development roadmap |
 | [docs/adr/](docs/adr/) | why it is built this way |
-
