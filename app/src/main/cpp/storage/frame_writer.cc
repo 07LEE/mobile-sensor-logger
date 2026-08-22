@@ -68,9 +68,9 @@ void FrameWriter::Run() {
 
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      // Bounded by the same number as the queue: past that, buffers are being
-      // kept for a backlog that is not happening.
-      if (spare_buffers_.size() < max_queued_) {
+      // Bounded by kSpareBufferCapacity rather than the queue: past that,
+      // buffers are being kept for a backlog that is not happening.
+      if (spare_buffers_.size() < kSpareBufferCapacity) {
         spare_buffers_.push_back(frame.ReleaseBuffer());
       }
     }

@@ -37,6 +37,18 @@ class FrameWriter {
   // this is the memory the buffering is allowed to cost.
   static constexpr size_t kDefaultMaxQueued = 8;
 
+  // Buffers kept ready for reuse once a written frame is done with them,
+  // deliberately larger than the submit queue. The queue bounds how many
+  // frames may be in flight before one is dropped and counted; this pool is
+  // what a temporary lag in disk speed draws down first, before a frame has
+  // to pay for a fresh, page-faulting allocation instead (see
+  // PendingFrame::AdoptBuffer). At capture resolution each is on the order of
+  // twenty megabytes, not three, so this is deliberately a smaller multiple
+  // of the queue than it might otherwise be. It buys more runway before a
+  // sustained shortfall empties it anyway — it does not raise the disk's
+  // ceiling.
+  static constexpr size_t kSpareBufferCapacity = 12;
+
   FrameWriter() = default;
   ~FrameWriter();
 
