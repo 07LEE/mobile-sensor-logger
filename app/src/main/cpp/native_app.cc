@@ -92,10 +92,13 @@ struct AppState {
   int pending_delete_index = -1;
   bool permission_granted = false;
 
-  // The exact list the sessions overlay was last drawn from. Delete taps must
-  // resolve against this same list rather than a fresh directory read: readdir
-  // order is not guaranteed stable between calls, so a second read could put a
-  // different session at the tapped index and delete the wrong one.
+  // The sessions overlay's contents. Fetched once when the overlay opens
+  // (each session's size costs a recursive stat of its whole directory tree,
+  // too expensive to redo every frame) and updated in place on delete, rather
+  // than re-read. Delete taps also resolve against this same list rather than
+  // a fresh directory read: readdir order is not guaranteed stable between
+  // calls, so a second read could put a different session at the tapped index
+  // and delete the wrong one.
   std::vector<sensor_logger::SessionItem> cached_sessions;
 };
 
@@ -583,6 +586,8 @@ extern "C" void android_main(android_app* app) {
               if (touched_idx < static_cast<int>(state.cached_sessions.size())) {
                 SessionRecorder::DeleteSessionPath(
                     state.cached_sessions[static_cast<size_t>(touched_idx)].full_path);
+                state.cached_sessions.erase(
+                    state.cached_sessions.begin() + touched_idx);
               }
               state.pending_delete_index = -1;
             } else {
@@ -599,6 +604,10 @@ extern "C" void android_main(android_app* app) {
           if (!state.recorder.is_recording()) {
             state.sessions_overlay_visible = !state.sessions_overlay_visible;
             state.pending_delete_index = -1;
+            if (state.sessions_overlay_visible) {
+              state.cached_sessions =
+                  SessionRecorder::GetSessions(SessionRoot(state.app));
+            }
           }
         }
       }
@@ -683,7 +692,6 @@ extern "C" void android_main(android_app* app) {
     }
 
     if (state.sessions_overlay_visible) {
-      state.cached_sessions = SessionRecorder::GetSessions(SessionRoot(state.app));
       state.preview.DrawSessionsOverlay(state.cached_sessions, state.pending_delete_index);
     }
 
