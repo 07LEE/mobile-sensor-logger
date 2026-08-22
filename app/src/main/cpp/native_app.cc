@@ -584,10 +584,16 @@ extern "C" void android_main(android_app* app) {
           if (touched_idx >= 0) {
             if (state.pending_delete_index == touched_idx) {
               if (touched_idx < static_cast<int>(state.cached_sessions.size())) {
-                SessionRecorder::DeleteSessionPath(
-                    state.cached_sessions[static_cast<size_t>(touched_idx)].full_path);
-                state.cached_sessions.erase(
-                    state.cached_sessions.begin() + touched_idx);
+                const std::string& path =
+                    state.cached_sessions[static_cast<size_t>(touched_idx)].full_path;
+                if (SessionRecorder::DeleteSessionPath(path)) {
+                  state.cached_sessions.erase(
+                      state.cached_sessions.begin() + touched_idx);
+                } else {
+                  __android_log_print(ANDROID_LOG_WARN, kTag,
+                                      "failed to delete session: %s",
+                                      path.c_str());
+                }
               }
               state.pending_delete_index = -1;
             } else {
