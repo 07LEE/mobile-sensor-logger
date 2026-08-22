@@ -634,7 +634,7 @@ std::vector<std::string> StatusLines(const AppState& state) {
   } else if (state.stop_reason != nullptr) {
     std::snprintf(buffer, sizeof(buffer), "%s", state.stop_reason);
   } else {
-    std::snprintf(buffer, sizeof(buffer), "IDLE - VOL DOWN");
+    std::snprintf(buffer, sizeof(buffer), "VOL DOWN");
   }
   lines.emplace_back(buffer);
 
@@ -658,10 +658,10 @@ std::vector<std::string> StatusLines(const AppState& state) {
                 state.config.min_residual * 100.0f);
   lines.emplace_back(buffer);
 
-  std::snprintf(buffer, sizeof(buffer), "%dX%d %s %s",
-                state.camera.capture_width(), state.camera.capture_height(),
-                state.camera.LensName(),
-                state.config.retention == Retention::kAll ? "ALL" : "SHARP");
+  // Lens and retention are already on their own buttons below; the resolution
+  // is not shown anywhere else.
+  std::snprintf(buffer, sizeof(buffer), "%dX%d",
+                state.camera.capture_width(), state.camera.capture_height());
   lines.emplace_back(buffer);
 
   // What the camera is doing with the picture, locked or not. Watching these
