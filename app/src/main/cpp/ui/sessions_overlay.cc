@@ -130,27 +130,13 @@ void SessionsOverlay::Draw(
       // Draw session label text with aspect-preserved scaling
       char text_buf[64];
       std::snprintf(text_buf, sizeof(text_buf), "%.16s %.1fMB", sess.name.c_str(), sess.megabytes);
-      std::vector<std::string> s_line = {text_buf};
       const int s_cols = static_cast<int>(std::strlen(text_buf));
-
-      rasterize_text_fn(s_line, s_cols);
-      glBindTexture(GL_TEXTURE_2D, text_texture);
-      const float s_used = static_cast<float>(s_cols) / static_cast<float>(kTextColumns);
-      const float s_uvs[8] = {0.0f, h_row, s_used, h_row, 0.0f, 0.0f, s_used, 0.0f};
-
-      const float s_box_w = vp_w * 0.54f;
-      const float s_box_h = vp_h * kRowH * 0.5f;
-      const float s_sw = s_box_w * 0.95f / static_cast<float>(s_cols * kCellWidth);
-      const float s_sh = s_box_h * 0.70f / static_cast<float>(kGlyphHeight);
-      const float s_sc = s_sw < s_sh ? s_sw : s_sh;
-
-      const float s_lw = 2.0f * static_cast<float>(s_cols * kCellWidth) * s_sc / vp_w;
-      const float s_lh = 2.0f * static_cast<float>(kGlyphHeight) * s_sc / vp_h;
-      const float s_left = -0.88f;
       const float s_cy = (row_top + row_bottom) * 0.5f;
 
-      glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, 1.0f);
-      DrawQuad(quad_program, vbo, s_left, s_cy - s_lh * 0.5f, s_left + s_lw, s_cy + s_lh * 0.5f, s_uvs);
+      DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
+                      text_buf, s_cols, vp_w * 0.54f, vp_h * kRowH * 0.5f,
+                      0.95f, 0.70f, LabelAnchor::kLeft, -0.88f, s_cy, vp_w,
+                      vp_h, 1.0f, 1.0f, 1.0f, 1.0f, rasterize_text_fn);
 
       // Draw individual delete button next to session item
       const bool is_pending = (pending_delete_index == i);
@@ -174,25 +160,14 @@ void SessionsOverlay::Draw(
       DrawQuad(quad_program, vbo, btn_left, row_bottom, btn_right, row_top, kFullUvs);
 
       const int b_cols = static_cast<int>(btn_label.size());
-      rasterize_text_fn({btn_label}, b_cols);
-      glBindTexture(GL_TEXTURE_2D, text_texture);
-      const float b_used = static_cast<float>(b_cols) / static_cast<float>(kTextColumns);
-      const float b_uvs[8] = {0.0f, h_row, b_used, h_row, 0.0f, 0.0f, b_used, 0.0f};
-
-      const float b_box_w = vp_w * (btn_right - btn_left) * 0.5f;
-      const float b_box_h = vp_h * kRowH * 0.5f;
-      const float b_sw = b_box_w * 0.85f / static_cast<float>(b_cols * kCellWidth);
-      const float b_sh = b_box_h * 0.65f / static_cast<float>(kGlyphHeight);
-      const float b_sc = b_sw < b_sh ? b_sw : b_sh;
-
-      const float b_lw = 2.0f * static_cast<float>(b_cols * kCellWidth) * b_sc / vp_w;
-      const float b_lh = 2.0f * static_cast<float>(kGlyphHeight) * b_sc / vp_h;
       const float b_cx = (btn_left + btn_right) * 0.5f;
       const float b_cy = (row_top + row_bottom) * 0.5f;
 
-      glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, 1.0f);
-      DrawQuad(quad_program, vbo, b_cx - b_lw * 0.5f, b_cy - b_lh * 0.5f,
-                     b_cx + b_lw * 0.5f, b_cy + b_lh * 0.5f, b_uvs);
+      DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
+                      btn_label, b_cols, vp_w * (btn_right - btn_left) * 0.5f,
+                      vp_h * kRowH * 0.5f, 0.85f, 0.65f, LabelAnchor::kCenter,
+                      b_cx, b_cy, vp_w, vp_h, 1.0f, 1.0f, 1.0f, 1.0f,
+                      rasterize_text_fn);
     }
   }
 
@@ -218,27 +193,14 @@ void SessionsOverlay::Draw(
   glUniform4f(quad_color_location, 0.25f, 0.28f, 0.35f, 1.0f);
   DrawQuad(quad_program, vbo, close_left, close_bottom, close_right, close_top, kFullUvs);
 
-  rasterize_text_fn({"[ CLOSE ]"}, 9);
-  glBindTexture(GL_TEXTURE_2D, text_texture);
-
-  const float c_used = 9.0f / static_cast<float>(kTextColumns);
-  const float c_row = 1.0f / static_cast<float>(kTextRows);
-  const float c_uvs[8] = {0.0f, c_row, c_used, c_row, 0.0f, 0.0f, c_used, 0.0f};
-
-  const float c_box_w = vp_w * close_w * 0.5f;
   const float c_box_h = vp_h * kBtnH * 0.5f;
-  const float c_sw = c_box_w * 0.85f / static_cast<float>(9 * kCellWidth);
-  const float c_sh = c_box_h * 0.65f / static_cast<float>(kGlyphHeight);
-  const float c_sc = c_sw < c_sh ? c_sw : c_sh;
-
-  const float c_lw = 2.0f * static_cast<float>(9 * kCellWidth) * c_sc / vp_w;
-  const float c_lh = 2.0f * static_cast<float>(kGlyphHeight) * c_sc / vp_h;
   const float c_cx = (close_left + close_right) * 0.5f;
   const float c_cy = (close_top + close_bottom) * 0.5f;
 
-  glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, 1.0f);
-  DrawQuad(quad_program, vbo, c_cx - c_lw * 0.5f, c_cy - c_lh * 0.5f,
-                 c_cx + c_lw * 0.5f, c_cy + c_lh * 0.5f, c_uvs);
+  DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
+                  "[ CLOSE ]", 9, vp_w * close_w * 0.5f, c_box_h, 0.85f, 0.65f,
+                  LabelAnchor::kCenter, c_cx, c_cy, vp_w, vp_h, 1.0f, 1.0f,
+                  1.0f, 1.0f, rasterize_text_fn);
 
   if (paginated) {
     const float prev_left = -0.90f;
@@ -265,41 +227,19 @@ void SessionsOverlay::Draw(
                 next_enabled_ ? 1.0f : 0.5f);
     DrawQuad(quad_program, vbo, next_left, close_bottom, next_right, close_top, kFullUvs);
 
-    const std::string prev_label = "< PREV";
-    const std::string next_label = "NEXT >";
-    const int p_cols = static_cast<int>(prev_label.size());
-    const int n_cols = static_cast<int>(next_label.size());
     const float side_box_w = vp_w * kSideBtnW * 0.5f;
-
-    rasterize_text_fn({prev_label}, p_cols);
-    glBindTexture(GL_TEXTURE_2D, text_texture);
-    const float p_used = static_cast<float>(p_cols) / static_cast<float>(kTextColumns);
-    const float p_uvs[8] = {0.0f, c_row, p_used, c_row, 0.0f, 0.0f, p_used, 0.0f};
-    const float p_sw = side_box_w * 0.85f / static_cast<float>(p_cols * kCellWidth);
-    const float p_sh = c_box_h * 0.65f / static_cast<float>(kGlyphHeight);
-    const float p_sc = p_sw < p_sh ? p_sw : p_sh;
-    const float p_lw = 2.0f * static_cast<float>(p_cols * kCellWidth) * p_sc / vp_w;
-    const float p_lh = 2.0f * static_cast<float>(kGlyphHeight) * p_sc / vp_h;
     const float p_cx = (prev_left + prev_right) * 0.5f;
-
-    glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, prev_enabled_ ? 1.0f : 0.45f);
-    DrawQuad(quad_program, vbo, p_cx - p_lw * 0.5f, c_cy - p_lh * 0.5f,
-             p_cx + p_lw * 0.5f, c_cy + p_lh * 0.5f, p_uvs);
-
-    rasterize_text_fn({next_label}, n_cols);
-    glBindTexture(GL_TEXTURE_2D, text_texture);
-    const float n_used = static_cast<float>(n_cols) / static_cast<float>(kTextColumns);
-    const float n_uvs[8] = {0.0f, c_row, n_used, c_row, 0.0f, 0.0f, n_used, 0.0f};
-    const float n_sw = side_box_w * 0.85f / static_cast<float>(n_cols * kCellWidth);
-    const float n_sh = c_box_h * 0.65f / static_cast<float>(kGlyphHeight);
-    const float n_sc = n_sw < n_sh ? n_sw : n_sh;
-    const float n_lw = 2.0f * static_cast<float>(n_cols * kCellWidth) * n_sc / vp_w;
-    const float n_lh = 2.0f * static_cast<float>(kGlyphHeight) * n_sc / vp_h;
     const float n_cx = (next_left + next_right) * 0.5f;
 
-    glUniform4f(quad_color_location, 1.0f, 1.0f, 1.0f, next_enabled_ ? 1.0f : 0.45f);
-    DrawQuad(quad_program, vbo, n_cx - n_lw * 0.5f, c_cy - n_lh * 0.5f,
-             n_cx + n_lw * 0.5f, c_cy + n_lh * 0.5f, n_uvs);
+    DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
+                    "< PREV", 6, side_box_w, c_box_h, 0.85f, 0.65f,
+                    LabelAnchor::kCenter, p_cx, c_cy, vp_w, vp_h, 1.0f, 1.0f,
+                    1.0f, prev_enabled_ ? 1.0f : 0.45f, rasterize_text_fn);
+
+    DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
+                    "NEXT >", 6, side_box_w, c_box_h, 0.85f, 0.65f,
+                    LabelAnchor::kCenter, n_cx, c_cy, vp_w, vp_h, 1.0f, 1.0f,
+                    1.0f, next_enabled_ ? 1.0f : 0.45f, rasterize_text_fn);
   }
 
   glDisable(GL_BLEND);

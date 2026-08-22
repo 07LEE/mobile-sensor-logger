@@ -47,29 +47,16 @@ void UiButton::Draw(GLuint quad_program, GLuint white_texture, GLuint text_textu
   }
   DrawQuad(quad_program, vbo, left, bottom, right, top, kFullUvs);
 
-  // 2. Draw Text Quad Centered inside Button using exact original formula
+  // 2. Draw Text Quad Centered inside Button
   const int columns = static_cast<int>(label.size()) + 2;
-  rasterize_text_fn({label}, columns);
-  glBindTexture(GL_TEXTURE_2D, text_texture);
-
-  const float by_width = button_width_px * 0.86f / static_cast<float>(columns * kCellWidth);
-  const float by_height = height_px * 0.5f / static_cast<float>(kGlyphHeight);
-  const float scale = by_width < by_height ? by_width : by_height;
-
-  const float used = static_cast<float>(columns) / static_cast<float>(kTextColumns);
-  const float row = 1.0f / static_cast<float>(kTextRows);
-  const float label_uvs[8] = {0.0f, row, used, row, 0.0f, 0.0f, used, 0.0f};
-
-  const float label_width = 2.0f * static_cast<float>(columns * kCellWidth) * scale / vp_w;
-  const float label_height = 2.0f * static_cast<float>(kGlyphHeight) * scale / vp_h;
   const float centre_x = (left + right) * 0.5f;
   const float label_centre = (top + bottom) * 0.5f;
+  const float shade = enabled ? 1.0f : 0.45f;
 
-  glUniform4f(quad_color_location, enabled ? 1.0f : 0.45f,
-              enabled ? 1.0f : 0.45f, enabled ? 1.0f : 0.45f, 1.0f);
-  DrawQuad(quad_program, vbo, centre_x - label_width * 0.5f,
-                 label_centre - label_height * 0.5f, centre_x + label_width * 0.5f,
-                 label_centre + label_height * 0.5f, label_uvs);
+  DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location, label,
+                  columns, button_width_px, height_px, 0.86f, 0.5f,
+                  LabelAnchor::kCenter, centre_x, label_centre, vp_w, vp_h,
+                  shade, shade, shade, 1.0f, rasterize_text_fn);
 
   glDisable(GL_BLEND);
 }

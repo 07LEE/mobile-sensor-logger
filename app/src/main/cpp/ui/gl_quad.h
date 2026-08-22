@@ -3,6 +3,10 @@
 
 #include <GLES3/gl3.h>
 
+#include <functional>
+#include <string>
+#include <vector>
+
 namespace sensor_logger {
 
 // Layout of the fixed-grid bitmap font texture that PreviewRenderer
@@ -19,6 +23,25 @@ constexpr int kTextRows = 8;
 // bottom-right, top-left, top-right.
 void DrawQuad(GLuint program, GLuint vbo, float x0, float y0, float x1,
               float y1, const float* uvs);
+
+// Where DrawScaledLabel positions the label horizontally: at `anchor_x` sits
+// its centre, or its left edge.
+enum class LabelAnchor { kCenter, kLeft };
+
+// Rasterises `label` (already known to be `columns` glyphs) via
+// `rasterize_text_fn`, then draws it as one quad against `text_texture`,
+// scaled by whichever of width or height is tighter to fit within a
+// `box_width_px` x `box_height_px` area — each shrunk first by its own fill
+// fraction (< 1.0) to leave padding — and vertically centered on `center_y`.
+void DrawScaledLabel(GLuint program, GLuint vbo, GLuint text_texture,
+                     GLint quad_color_location, const std::string& label,
+                     int columns, float box_width_px, float box_height_px,
+                     float width_fill, float height_fill, LabelAnchor anchor,
+                     float anchor_x, float center_y, float viewport_width,
+                     float viewport_height, float red, float green, float blue,
+                     float alpha,
+                     const std::function<void(const std::vector<std::string>&, int)>&
+                         rasterize_text_fn);
 
 }  // namespace sensor_logger
 
