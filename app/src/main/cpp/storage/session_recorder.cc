@@ -46,6 +46,20 @@ std::string Escaped(const std::string& text) {
   return out;
 }
 
+// Writes one `"<key>": {...} | null` line, the shape start_location and
+// end_location both need in the manifest.
+void WriteLocationField(std::ofstream& out, const char* key,
+                        const LocationData& location) {
+  if (location.valid) {
+    out << "  \"" << key << "\": {\"latitude\": " << location.latitude
+        << ", \"longitude\": " << location.longitude
+        << ", \"altitude_m\": " << location.altitude_m
+        << ", \"accuracy_m\": " << location.accuracy_m << "},\n";
+  } else {
+    out << "  \"" << key << "\": null,\n";
+  }
+}
+
 bool MakeDirectory(const std::string& path) {
   if (mkdir(path.c_str(), 0755) == 0) return true;
   // Reusing an existing directory is fine; anything else is a real failure.
@@ -304,6 +318,8 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
   double fov_v = 0.0;
   if (camera_.focal_length_mm > 0.0f && camera_.sensor_width_mm > 0.0f) {
     fov_h = 2.0 * std::atan(camera_.sensor_width_mm / (2.0 * camera_.focal_length_mm)) * 180.0 / 3.14159265358979323846;
+  }
+  if (camera_.focal_length_mm > 0.0f && camera_.sensor_height_mm > 0.0f) {
     fov_v = 2.0 * std::atan(camera_.sensor_height_mm / (2.0 * camera_.focal_length_mm)) * 180.0 / 3.14159265358979323846;
   }
 
@@ -379,23 +395,8 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
              << ",\n";
   }
 
-  if (start_location_.valid) {
-    manifest << "  \"start_location\": {\"latitude\": " << start_location_.latitude
-             << ", \"longitude\": " << start_location_.longitude
-             << ", \"altitude_m\": " << start_location_.altitude_m
-             << ", \"accuracy_m\": " << start_location_.accuracy_m << "},\n";
-  } else {
-    manifest << "  \"start_location\": null,\n";
-  }
-
-  if (end_location.valid) {
-    manifest << "  \"end_location\": {\"latitude\": " << end_location.latitude
-             << ", \"longitude\": " << end_location.longitude
-             << ", \"altitude_m\": " << end_location.altitude_m
-             << ", \"accuracy_m\": " << end_location.accuracy_m << "},\n";
-  } else {
-    manifest << "  \"end_location\": null,\n";
-  }
+  WriteLocationField(manifest, "start_location", start_location_);
+  WriteLocationField(manifest, "end_location", end_location);
 
   manifest << "  \"stabilisation\": \"off, both optical and digital; either "
               "one changes the camera geometry between frames\",\n"
