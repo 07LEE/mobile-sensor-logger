@@ -846,8 +846,8 @@ extern "C" void android_main(android_app* app) {
     const char* lock_label =
         state.exposure_pinned ? "PINNED - TAP TO CLEAR" : "LOCK - TAP";
 
-    constexpr float kGap = 0.02f;
-    constexpr float kBtnHeight = 0.045f;
+    constexpr float kGap = 0.015f;
+    constexpr float kBtnHeight = 0.040f;
 
     // Ordered by how often each gets touched around a recording rather than
     // alphabetically or by when it was added: the lock is checked before
@@ -855,21 +855,25 @@ extern "C" void android_main(android_app* app) {
     // an occasional housekeeping visit — so it sits furthest from a thumb
     // reaching for the others in a hurry.
     if (state.preview_visible) {
-      state.preview.DrawCamera(state.camera.sensor_orientation(), 0.58f, 0.05f);
-      float bottom = state.preview.DrawStatus(
-          StatusLines(state), state.recorder.is_recording(), 0.65f, 40);
-      float btn_pos = bottom + kGap;
+      state.preview.DrawCamera(state.camera.sensor_orientation(), 0.62f, 0.03f);
+      state.preview.DrawStatus(
+          StatusLines(state), state.recorder.is_recording(), 0.04f, 40);
+
+      constexpr float kOverlayGap = 0.010f;
+      constexpr float kOverlayBtnH = 0.040f;
+      float btn_pos = 0.680f;
+
       state.preview.DrawLockButton(lock_label, btn_pos,
                                    !state.recorder.is_recording(),
                                    state.exposure_pinned);
-      btn_pos += kBtnHeight + kGap;
+      btn_pos += kOverlayBtnH + kOverlayGap;
       state.preview.DrawRetentionButton(retention_label, btn_pos,
                                         !state.recorder.is_recording());
-      btn_pos += kBtnHeight + kGap;
+      btn_pos += kOverlayBtnH + kOverlayGap;
       if (lens_choice) {
         state.preview.DrawLensButton(lens_label, btn_pos,
                                      !state.recorder.is_recording());
-        btn_pos += kBtnHeight + kGap;
+        btn_pos += kOverlayBtnH + kOverlayGap;
       }
       state.preview.DrawSessionsButton("SESSIONS - TAP", btn_pos,
                                        !state.recorder.is_recording());
