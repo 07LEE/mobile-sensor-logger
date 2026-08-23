@@ -446,6 +446,14 @@ bool PreviewRenderer::ProPanelMainsContains(float x, float y) const {
   return pro_panel_.MainsTouched(x, y);
 }
 
+bool PreviewRenderer::ProPanelShiftContains(float x, float y) const {
+  return pro_panel_.ShiftTouched(x, y);
+}
+
+bool PreviewRenderer::ProPanelResidualContains(float x, float y) const {
+  return pro_panel_.ResidualTouched(x, y);
+}
+
 bool PreviewRenderer::ProPanelResetContains(float x, float y) const {
   return pro_panel_.ResetTouched(x, y);
 }
@@ -530,10 +538,13 @@ void PreviewRenderer::DrawProButton(const std::string& label,
 
 void PreviewRenderer::DrawProPanel(const std::string& shutter_label,
                                    const std::string& fps_label,
-                                   const std::string& mains_label) {
+                                   const std::string& mains_label,
+                                   const std::string& shift_label,
+                                   const std::string& residual_label) {
   pro_panel_.Draw(
       quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
-      shutter_label, fps_label, mains_label, viewport_width_, viewport_height_,
+      shutter_label, fps_label, mains_label, shift_label, residual_label,
+      viewport_width_, viewport_height_,
       [this](const std::vector<std::string>& lines, int columns) {
         RasterizeText(lines, columns);
       });

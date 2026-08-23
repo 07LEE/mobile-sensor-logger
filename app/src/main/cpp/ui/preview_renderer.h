@@ -89,16 +89,20 @@ class PreviewRenderer {
   void DrawProButton(const std::string& label, float top_fraction, bool enabled);
   bool ProButtonContains(float x, float y) const;
 
-  // The panel opened by the PRO button: shutter, fps and mains, each a row
-  // that cycles its own value on tap. See ProPanel for why these three and
-  // not shift/residual too.
+  // The panel opened by the PRO button: shutter, fps, mains, shift and
+  // residual, each a row that cycles its own value on tap. See ProPanel for
+  // why shift/residual step through presets rather than a free value.
   void DrawProPanel(const std::string& shutter_label,
                     const std::string& fps_label,
-                    const std::string& mains_label);
+                    const std::string& mains_label,
+                    const std::string& shift_label,
+                    const std::string& residual_label);
   bool ProPanelCloseContains(float x, float y) const;
   bool ProPanelShutterContains(float x, float y) const;
   bool ProPanelFpsContains(float x, float y) const;
   bool ProPanelMainsContains(float x, float y) const;
+  bool ProPanelShiftContains(float x, float y) const;
+  bool ProPanelResidualContains(float x, float y) const;
   bool ProPanelResetContains(float x, float y) const;
 
   // Render sessions overlay dialog with individual delete buttons and confirm

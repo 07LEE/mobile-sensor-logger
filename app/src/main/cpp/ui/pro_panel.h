@@ -10,9 +10,12 @@
 namespace sensor_logger {
 
 // Overlay for the capture.conf values that have no toolbar button of their
-// own: the shutter cap, the fps pin and the mains frequency. shift/residual
-// stay file-only — they are continuous, and a row that can only step through
-// a fixed list of values would misrepresent them.
+// own: the shutter cap, the fps pin, the mains frequency, and the shift/
+// residual motion thresholds. Unlike the other three, shift and residual are
+// continuous rather than a small natural set of choices, so their rows step
+// through a fixed list of presets around the default rather than covering
+// the range — a coarser control than the file allows, in exchange for one
+// that fits the same tap-to-cycle pattern as everything else here.
 //
 // Each row cycles its setting through a fixed list on tap, the same way the
 // Retention and Lens buttons already do. What sets a row here apart is that
@@ -26,7 +29,8 @@ class ProPanel {
   void Draw(GLuint quad_program, GLuint white_texture, GLuint text_texture,
             GLint quad_color_location, GLuint vbo,
             const std::string& shutter_label, const std::string& fps_label,
-            const std::string& mains_label, int viewport_width,
+            const std::string& mains_label, const std::string& shift_label,
+            const std::string& residual_label, int viewport_width,
             int viewport_height,
             const std::function<void(const std::vector<std::string>&, int)>&
                 rasterize_text_fn);
@@ -35,6 +39,8 @@ class ProPanel {
   bool ShutterTouched(float x, float y) const;
   bool FpsTouched(float x, float y) const;
   bool MainsTouched(float x, float y) const;
+  bool ShiftTouched(float x, float y) const;
+  bool ResidualTouched(float x, float y) const;
   bool ResetTouched(float x, float y) const;
 
  private:
@@ -51,6 +57,8 @@ class ProPanel {
   Rect shutter_;
   Rect fps_;
   Rect mains_;
+  Rect shift_;
+  Rect residual_;
   Rect reset_;
 };
 

@@ -6,6 +6,7 @@
 
 #include <sys/statvfs.h>
 
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -674,6 +675,52 @@ void CycleMains(AppState* state) {
   state->config.Save(FilesRoot(state->app));
 }
 
+// Steps the shift threshold through presets either side of the default.
+// Lower closes a stretch on less movement, so the camera is kept to shorter,
+// more frequent stretches and the frames written sit closer together —
+// steadier overlap, spent faster against the free space budget.
+void CycleShift(AppState* state) {
+  if (state->recorder.is_recording()) {
+    LogInfo("not changing shift while recording; stop first");
+    return;
+  }
+
+  constexpr float kSteps[] = {0.06f, 0.09f, 0.12f, 0.18f};
+  constexpr size_t kStepCount = sizeof(kSteps) / sizeof(kSteps[0]);
+
+  size_t index = 2;  // 0.12, the default, if nothing close enough matches
+  for (size_t i = 0; i < kStepCount; ++i) {
+    if (std::fabs(kSteps[i] - state->config.min_shift) < 0.005f) {
+      index = i;
+      break;
+    }
+  }
+  state->config.min_shift = kSteps[(index + 1) % kStepCount];
+  state->config.Save(FilesRoot(state->app));
+}
+
+// Same for residual, which sits at about half of shift by convention (0.06
+// beside a shift default of 0.12).
+void CycleResidual(AppState* state) {
+  if (state->recorder.is_recording()) {
+    LogInfo("not changing residual while recording; stop first");
+    return;
+  }
+
+  constexpr float kSteps[] = {0.03f, 0.045f, 0.06f, 0.09f};
+  constexpr size_t kStepCount = sizeof(kSteps) / sizeof(kSteps[0]);
+
+  size_t index = 2;  // 0.06, the default, if nothing close enough matches
+  for (size_t i = 0; i < kStepCount; ++i) {
+    if (std::fabs(kSteps[i] - state->config.min_residual) < 0.0025f) {
+      index = i;
+      break;
+    }
+  }
+  state->config.min_residual = kSteps[(index + 1) % kStepCount];
+  state->config.Save(FilesRoot(state->app));
+}
+
 // Steps the fps pin through auto / 30 / 24 / 15.
 //
 // Unlike shutter and mains, this one takes a camera restart to actually take
@@ -709,11 +756,12 @@ void CycleFps(AppState* state) {
   state->last_timestamp_ns = 0;
 }
 
-// Puts shutter, fps and mains back to their defaults in one tap, rather than
-// cycling each one back around individually — shutter alone can be five taps
-// from auto. What this is for is not stranding a test value (a shutter cap
-// or a pinned fps tried out while figuring out a scene) in capture.conf,
-// where it would silently carry into a take that never meant to use it.
+// Puts shutter, fps, mains, shift and residual back to their defaults in one
+// tap, rather than cycling each one back around individually — shutter alone
+// can be five taps from auto. What this is for is not stranding a test value
+// (a shutter cap or a pinned fps tried out while figuring out a scene) in
+// capture.conf, where it would silently carry into a take that never meant
+// to use it.
 void ResetProSettings(AppState* state) {
   if (state->recorder.is_recording()) {
     LogInfo("not resetting pro settings while recording; stop first");
@@ -725,6 +773,8 @@ void ResetProSettings(AppState* state) {
   state->config.max_exposure_ns = 0;
   state->config.fixed_fps = 0;
   state->config.mains_hz = 60;
+  state->config.min_shift = 0.12f;
+  state->config.min_residual = 0.06f;
   state->config.Save(FilesRoot(state->app));
 
   if (fps_changed) {
@@ -1002,6 +1052,10 @@ extern "C" void android_main(android_app* app) {
           CycleFps(&state);
         } else if (state.preview.ProPanelMainsContains(input.x, input.y)) {
           CycleMains(&state);
+        } else if (state.preview.ProPanelShiftContains(input.x, input.y)) {
+          CycleShift(&state);
+        } else if (state.preview.ProPanelResidualContains(input.x, input.y)) {
+          CycleResidual(&state);
         } else if (state.preview.ProPanelResetContains(input.x, input.y)) {
           ResetProSettings(&state);
         }
@@ -1137,6 +1191,14 @@ extern "C" void android_main(android_app* app) {
       std::snprintf(mains_label, sizeof(mains_label), "MAINS: OFF");
     }
 
+    char shift_label[24];
+    std::snprintf(shift_label, sizeof(shift_label), "SHIFT: %.3F",
+                  state.config.min_shift);
+
+    char residual_label[24];
+    std::snprintf(residual_label, sizeof(residual_label), "RESIDUAL: %.3F",
+                  state.config.min_residual);
+
     constexpr float kGap = 0.015f;
     constexpr float kBtnHeight = 0.040f;
 
@@ -1207,7 +1269,8 @@ extern "C" void android_main(android_app* app) {
                                         state.sessions_page);
     }
     if (state.pro_panel_visible) {
-      state.preview.DrawProPanel(shutter_label, fps_label, mains_label);
+      state.preview.DrawProPanel(shutter_label, fps_label, mains_label,
+                                 shift_label, residual_label);
     }
 
     eglSwapBuffers(state.display, state.surface);
