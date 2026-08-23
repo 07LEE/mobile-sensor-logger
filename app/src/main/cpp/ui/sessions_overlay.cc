@@ -35,7 +35,7 @@ void SessionsOverlay::Draw(
     GLuint quad_program, GLuint white_texture, GLuint text_texture,
     GLint quad_color_location, GLuint vbo,
     const std::vector<SessionItem>& sessions,
-    int pending_delete_index, int page, int viewport_width, int viewport_height,
+    int pending_delete_index, int* page, int viewport_width, int viewport_height,
     const std::function<void(const std::vector<std::string>&, int)>& rasterize_text_fn) {
   if (viewport_width <= 0 || viewport_height <= 0) return;
 
@@ -70,14 +70,22 @@ void SessionsOverlay::Draw(
 
   const int total = static_cast<int>(sessions.size());
   const int page_count = total == 0 ? 1 : (total + rows_per_page - 1) / rows_per_page;
-  if (page < 0) page = 0;
-  if (page > page_count - 1) page = page_count - 1;
-  page_start_ = page * rows_per_page;
+  // Written back through `page` rather than only clamped locally: the caller
+  // owns this value across frames (e.g. to step it on a PREV/NEXT tap), and a
+  // deletion can shrink page_count out from under whatever it was set to.
+  // Without the write-back, prev_enabled_/next_enabled_ here would reflect a
+  // page the caller's own copy no longer agrees with, and a tap decrements
+  // the stale value instead of the one actually on screen.
+  int page_value = *page;
+  if (page_value < 0) page_value = 0;
+  if (page_value > page_count - 1) page_value = page_count - 1;
+  *page = page_value;
+  page_start_ = page_value * rows_per_page;
   const int page_end = page_start_ + rows_per_page < total
                             ? page_start_ + rows_per_page
                             : total;
-  prev_enabled_ = page > 0;
-  next_enabled_ = page < page_count - 1;
+  prev_enabled_ = page_value > 0;
+  next_enabled_ = page_value < page_count - 1;
 
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -104,7 +112,7 @@ void SessionsOverlay::Draw(
   char header_buf[40];
   if (page_count > 1) {
     std::snprintf(header_buf, sizeof(header_buf), "=== SESSIONS (%d/%d) ===",
-                  page + 1, page_count);
+                  page_value + 1, page_count);
   } else {
     std::snprintf(header_buf, sizeof(header_buf), "=== SAVED SESSIONS ===");
   }

@@ -1297,7 +1297,12 @@ extern "C" void android_main(android_app* app) {
       // is smaller than the 0.68 version was, so the text now ends short of
       // where that figure points, and a fixed fraction is needed instead of
       // one relative to a block height that no longer describes this layout.
-      const float text_top = (1.0f - block) * 0.5f;
+      constexpr float kMinTextTop = 0.02f;
+      float text_top = (1.0f - block) * 0.5f;
+      // Same guard as kButtonsTop below, at the other end: if the status
+      // block is ever taller than expected, this keeps the text starting on
+      // screen instead of above the top edge.
+      if (text_top < kMinTextTop) text_top = kMinTextTop;
       constexpr float kButtonsTop = 0.55f;
 
       float bottom = state.preview.DrawStatus(
@@ -1327,7 +1332,7 @@ extern "C" void android_main(android_app* app) {
 
     if (state.sessions_overlay_visible) {
       state.preview.DrawSessionsOverlay(state.cached_sessions, state.pending_delete_index,
-                                        state.sessions_page);
+                                        &state.sessions_page);
     }
     if (state.pro_panel_visible) {
       state.preview.DrawProPanel(shutter_label, fps_label, mains_label,

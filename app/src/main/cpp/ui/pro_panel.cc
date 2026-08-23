@@ -1,5 +1,7 @@
 #include "pro_panel.h"
 
+#include <cstring>
+
 #include "gl_quad.h"
 
 namespace sensor_logger {
@@ -83,7 +85,7 @@ void ProPanel::Draw(
 
   // Header.
   const char* header = "=== PRO SETTINGS ===";
-  const int header_cols = 21;
+  const int header_cols = static_cast<int>(std::strlen(header));
   std::vector<std::string> header_lines = {header};
   rasterize_text_fn(header_lines, header_cols);
   glBindTexture(GL_TEXTURE_2D, text_texture);

@@ -173,7 +173,16 @@ PreviewRenderer::~PreviewRenderer() = default;
 bool PreviewRenderer::Init() {
   camera_program_ = LinkProgram(kCameraVertexShader, kCameraFragmentShader);
   quad_program_ = LinkProgram(kCameraVertexShader, kQuadFragmentShader);
-  if (camera_program_ == 0 || quad_program_ == 0) return false;
+  if (camera_program_ == 0 || quad_program_ == 0) {
+    // One of the two can still have linked; without freeing it here it stays
+    // a live GL object nothing points to until the next full Destroy(), on
+    // whatever context this failure leaves current.
+    if (camera_program_ != 0) glDeleteProgram(camera_program_);
+    if (quad_program_ != 0) glDeleteProgram(quad_program_);
+    camera_program_ = 0;
+    quad_program_ = 0;
+    return false;
+  }
 
   quad_color_location_ = glGetUniformLocation(quad_program_, "u_color");
 
@@ -552,7 +561,7 @@ void PreviewRenderer::DrawProPanel(const std::string& shutter_label,
 
 void PreviewRenderer::DrawSessionsOverlay(
     const std::vector<SessionItem>& sessions,
-    int pending_delete_index, int page) {
+    int pending_delete_index, int* page) {
   sessions_overlay_.Draw(
       quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
       sessions, pending_delete_index, page, viewport_width_, viewport_height_,

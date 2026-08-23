@@ -270,6 +270,9 @@ void SessionRecorder::WriteCandidate(int64_t timestamp_ns, float sharpness) {
   candidates_ << timestamp_ns << ',' << sharpness << ',' << motion_.last_shift()
               << ',' << motion_.last_residual() << '\n';
   candidates_.flush();
+  if (!candidates_.good()) {
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "candidates.csv write failed");
+  }
 }
 
 void SessionRecorder::FlushPending() {
