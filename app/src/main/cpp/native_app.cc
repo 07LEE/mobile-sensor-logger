@@ -1241,13 +1241,24 @@ extern "C" void android_main(android_app* app) {
       const float block =
           state.preview.StatusHeightFraction(kColumns, (int)lines.size()) +
           (lens_choice ? kGap + kBtnHeight : 0.0f) + 4 * (kGap + kBtnHeight);
-      // Biased toward the bottom rather than dead centre: the buttons are
-      // what a thumb is reaching for, and the empty space above the status
-      // lines matters less than how far that reach is.
-      const float top = (1.0f - block) * 0.68f;
+
+      // Positioned independently rather than as one block: the status lines
+      // stay where centring the whole block would have put them, and the
+      // buttons sit at a fixed position lower down — a thumb reaching for
+      // them does not care where the text above happens to end. Deriving
+      // both from the same (1 - block) figure does not work here: text_top
+      // is smaller than the 0.68 version was, so the text now ends short of
+      // where that figure points, and a fixed fraction is needed instead of
+      // one relative to a block height that no longer describes this layout.
+      const float text_top = (1.0f - block) * 0.5f;
+      constexpr float kButtonsTop = 0.55f;
 
       float bottom = state.preview.DrawStatus(
-          lines, state.recorder.is_recording(), top, kColumns);
+          lines, state.recorder.is_recording(), text_top, kColumns);
+      // Never lets the buttons ride up into the text if the status block is
+      // ever taller than the gap between the two positions allows for.
+      if (bottom < kButtonsTop) bottom = kButtonsTop;
+
       state.preview.DrawLockButton(lock_label, bottom + kGap,
                                    !state.recorder.is_recording(),
                                    state.exposure_pinned);
