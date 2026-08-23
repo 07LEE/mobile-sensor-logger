@@ -1241,7 +1241,10 @@ extern "C" void android_main(android_app* app) {
       const float block =
           state.preview.StatusHeightFraction(kColumns, (int)lines.size()) +
           (lens_choice ? kGap + kBtnHeight : 0.0f) + 4 * (kGap + kBtnHeight);
-      const float top = (1.0f - block) * 0.5f;
+      // Biased toward the bottom rather than dead centre: the buttons are
+      // what a thumb is reaching for, and the empty space above the status
+      // lines matters less than how far that reach is.
+      const float top = (1.0f - block) * 0.68f;
 
       float bottom = state.preview.DrawStatus(
           lines, state.recorder.is_recording(), top, kColumns);
