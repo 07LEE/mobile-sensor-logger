@@ -5,6 +5,8 @@
 #include <camera/NdkCameraManager.h>
 #include <media/NdkImageReader.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <mutex>
@@ -78,7 +80,13 @@ class CameraSource {
   bool Start(const CaptureConfig& config);
   void Stop();
 
-  bool is_running() const { return session_ != nullptr; }
+  // False once the framework reports the device disconnected or errored,
+  // even though session_ itself is only torn down by the next Stop() — a
+  // capture already in progress cannot otherwise tell a dead camera from a
+  // live one that simply has no new frame yet.
+  bool is_running() const {
+    return session_ != nullptr && !disconnected_.load();
+  }
 
   // Takes the newest capture frame, if one has arrived since the last call.
   // Returns false when none has. The previous frame is released here, so its
@@ -200,9 +208,23 @@ class CameraSource {
   static void OnCaptureCompleted(void* context, ACameraCaptureSession* session,
                                  ACaptureRequest* request,
                                  const ACameraMetadata* result);
+  static void OnDisconnected(void* context, ACameraDevice* device);
+  static void OnError(void* context, ACameraDevice* device, int error);
+
+  // Signals that the session Stop() just closed has actually finished
+  // closing, so Stop() can wait for it: closing a session is asynchronous,
+  // and completions already queued in the HAL still arrive on the framework
+  // thread until this fires.
+  static void OnSessionClosed(void* context, ACameraCaptureSession* session);
 
   std::mutex results_mutex_;
   std::deque<CaptureResult> results_;
+
+  std::mutex session_close_mutex_;
+  std::condition_variable session_close_cv_;
+  bool session_closed_ = true;
+
+  std::atomic<bool> disconnected_{false};
 };
 
 }  // namespace sensor_logger

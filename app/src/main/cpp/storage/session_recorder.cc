@@ -277,6 +277,11 @@ bool SessionRecorder::WriteImage(const PendingFrame& frame,
             static_cast<std::streamsize>(frame.pixels().size()));
   if (!out.good()) return false;
   out.close();
+  // On scoped storage's FUSE layer, a write can appear to succeed and still
+  // fail at close() (e.g. ENOSPC surfacing only on the final flush) — indexing
+  // the frame as written past this point would leave frames.csv pointing at a
+  // truncated file that looks valid to any downstream reader.
+  if (!out) return false;
 
   frames_ << frame.timestamp_ns() << ',' << filename << ',' << frame.width()
           << ',' << frame.height() << ',' << frame.sharpness() << ','
@@ -508,7 +513,10 @@ std::vector<SessionItem> SessionRecorder::GetSessions(
     if (std::strcmp(p->d_name, ".") == 0 || std::strcmp(p->d_name, "..") == 0) continue;
     std::string full_path = session_root + "/" + p->d_name;
     struct stat statbuf;
-    if (stat(full_path.c_str(), &statbuf) == 0 && S_ISDIR(statbuf.st_mode)) {
+    // lstat, not stat: see GetDirectorySize above. A symlink here must never
+    // be listed as a session, since deleting one recurses through whatever it
+    // points to rather than the session directory itself.
+    if (lstat(full_path.c_str(), &statbuf) == 0 && S_ISDIR(statbuf.st_mode)) {
       int64_t bytes = GetDirectorySize(full_path);
       SessionItem item;
       item.name = p->d_name;

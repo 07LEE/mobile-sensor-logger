@@ -5,8 +5,10 @@
 #include <camera/NdkCaptureRequest.h>
 #include <media/NdkImage.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -25,13 +27,6 @@ constexpr int32_t kPreviewBuffers = 2;
 // texture upload spent on pixels nobody sees.
 constexpr int32_t kMaxPreviewWidth = 1280;
 
-void OnDisconnected(void*, ACameraDevice*) {
-  __android_log_print(ANDROID_LOG_WARN, kTag, "camera disconnected");
-}
-
-void OnError(void*, ACameraDevice*, int error) {
-  __android_log_print(ANDROID_LOG_ERROR, kTag, "camera error %d", error);
-}
 
 // Results are kept only until the capture loop takes them. If it stops taking
 // them the camera is not being read either, and a queue that grew regardless
@@ -49,11 +44,32 @@ int32_t ReadU8(const ACameraMetadata* result, uint32_t tag) {
 
 void OnSessionReady(void*, ACameraCaptureSession*) {}
 void OnSessionActive(void*, ACameraCaptureSession*) {}
-void OnSessionClosed(void*, ACameraCaptureSession*) {}
 
 }  // namespace
 
 CameraSource::~CameraSource() { Stop(); }
+
+void CameraSource::OnDisconnected(void* context, ACameraDevice*) {
+  auto* self = static_cast<CameraSource*>(context);
+  if (self != nullptr) self->disconnected_.store(true);
+  __android_log_print(ANDROID_LOG_WARN, kTag, "camera disconnected");
+}
+
+void CameraSource::OnError(void* context, ACameraDevice*, int error) {
+  auto* self = static_cast<CameraSource*>(context);
+  if (self != nullptr) self->disconnected_.store(true);
+  __android_log_print(ANDROID_LOG_ERROR, kTag, "camera error %d", error);
+}
+
+void CameraSource::OnSessionClosed(void* context, ACameraCaptureSession*) {
+  auto* self = static_cast<CameraSource*>(context);
+  if (self == nullptr) return;
+  {
+    std::lock_guard<std::mutex> lock(self->session_close_mutex_);
+    self->session_closed_ = true;
+  }
+  self->session_close_cv_.notify_one();
+}
 
 void CameraSource::OnCaptureCompleted(void* context, ACameraCaptureSession*,
                                       ACaptureRequest*,
@@ -143,11 +159,15 @@ bool CameraSource::LockExposureAndFocus(const CaptureResult& metered,
 
     // Rounded down to a whole number of half-cycles of the lighting. An
     // exposure that is not banded the frame, because a rolling shutter catches
-    // each row at a different point in the cycle.
+    // each row at a different point in the cycle. When the requested cap is
+    // shorter than even one half-cycle, there is no whole number to round
+    // down to that still respects it — leaving it unrounded keeps the cap the
+    // user asked for rather than silently rounding up past it (which for the
+    // shortest shutter presets could more than double the requested time).
     if (mains_hz > 0) {
       const int64_t half_cycle_ns = 1000000000LL / (2 * mains_hz);
       const int64_t cycles = exposure / half_cycle_ns;
-      exposure = cycles > 0 ? cycles * half_cycle_ns : half_cycle_ns;
+      if (cycles > 0) exposure = cycles * half_cycle_ns;
     }
 
     if (min_exposure_ns_ > 0 && exposure < min_exposure_ns_) {
@@ -225,8 +245,15 @@ void CameraSource::UnlockExposureAndFocus() {
   ACameraCaptureSession_captureCallbacks callbacks{};
   callbacks.context = this;
   callbacks.onCaptureCompleted = OnCaptureCompleted;
-  ACameraCaptureSession_setRepeatingRequest(session_, &callbacks, 1, &request_,
-                                            nullptr);
+  if (ACameraCaptureSession_setRepeatingRequest(session_, &callbacks, 1,
+                                                &request_, nullptr) !=
+      ACAMERA_OK) {
+    // The sensor may still be running the locked/manual request; leaving
+    // locked_ true keeps is_locked() honest about that instead of claiming
+    // auto exposure/focus resumed when they did not.
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "could not unlock the camera");
+    return;
+  }
   locked_ = false;
 }
 
@@ -664,6 +691,11 @@ bool CameraSource::StartSession() {
                                  2, fps_range);
   }
 
+  {
+    std::lock_guard<std::mutex> lock(session_close_mutex_);
+    session_closed_ = false;
+  }
+
   ACameraCaptureSession_stateCallbacks state{};
   state.context = this;
   state.onReady = OnSessionReady;
@@ -710,6 +742,7 @@ std::string CameraSource::NextRearCameraId(const std::string& id) const {
 bool CameraSource::Start(const CaptureConfig& config) {
   if (session_ != nullptr) return true;
 
+  disconnected_.store(false);
   fixed_fps_ = config.fixed_fps;
 
   manager_ = ACameraManager_create();
@@ -726,6 +759,28 @@ bool CameraSource::Start(const CaptureConfig& config) {
 
 void CameraSource::Stop() {
   locked_ = false;
+
+  if (session_ != nullptr) {
+    ACameraCaptureSession_stopRepeating(session_);
+    ACameraCaptureSession_close(session_);
+
+    // ACameraCaptureSession_close is asynchronous: captures already queued in
+    // the HAL still complete, and still invoke OnCaptureCompleted on the
+    // framework thread, until onClosed fires. Waiting for it here means
+    // results_ is only cleared and session_ only nulled once the framework
+    // guarantees no more callbacks for this session are coming — otherwise a
+    // late completion could refill results_ with a just-abandoned
+    // lens/fps/config's data (fed straight into the next exposure lock), or
+    // land on a CameraSource already being destroyed.
+    std::unique_lock<std::mutex> lock(session_close_mutex_);
+    if (!session_close_cv_.wait_for(lock, std::chrono::seconds(2),
+                                    [this] { return session_closed_; })) {
+      __android_log_print(ANDROID_LOG_WARN, kTag,
+                          "camera session did not close within 2s");
+    }
+    session_ = nullptr;
+  }
+
   {
     std::lock_guard<std::mutex> lock(results_mutex_);
     results_.clear();
@@ -740,11 +795,6 @@ void CameraSource::Stop() {
     preview_image_ = nullptr;
   }
 
-  if (session_ != nullptr) {
-    ACameraCaptureSession_stopRepeating(session_);
-    ACameraCaptureSession_close(session_);
-    session_ = nullptr;
-  }
   if (request_ != nullptr) {
     ACaptureRequest_free(request_);
     request_ = nullptr;

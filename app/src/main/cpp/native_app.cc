@@ -325,6 +325,14 @@ void StartRecordingService(android_app* app) {
 
     if (start_service != nullptr) {
       env->CallObjectMethod(activity, start_service, intent);
+      if (env->ExceptionCheck()) {
+        // E.g. ForegroundServiceStartNotAllowedException on Android 12+ when
+        // the process is in a restricted background state. Clear it before
+        // any further JNI call on this thread: leaving one pending is
+        // undefined behavior per the JNI spec, not just for this call.
+        env->ExceptionClear();
+        LogError("startForegroundService threw");
+      }
     } else {
       env->ExceptionClear();
     }
@@ -371,6 +379,10 @@ void StopRecordingService(android_app* app) {
         "(Landroid/content/Intent;)Landroid/content/ComponentName;");
     if (start_service != nullptr) {
       env->CallObjectMethod(activity, start_service, intent);
+      if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        LogError("startService (stop) threw");
+      }
     }
 
     env->DeleteLocalRef(intent);
@@ -554,7 +566,7 @@ void ToggleRecording(AppState* state) {
     return;
   }
 
-  if (state->free_bytes > 0 && state->free_bytes < kMinimumFreeBytes) {
+  if (state->free_bytes < kMinimumFreeBytes) {
     state->stop_reason = "NOT ENOUGH SPACE TO START";
     LogError("not enough free space to start recording");
     return;
@@ -603,6 +615,11 @@ void NextLens(AppState* state) {
 
   if (!state->camera.Start(state->config)) {
     LogError("could not switch lens");
+    // The camera is now stopped, not merely idle: without this, `capturing`
+    // stays true from before this call and StartCapture's own guard
+    // ("if (capturing) return") blocks every future attempt to restart it,
+    // including the one the next resume/init-window event would trigger.
+    state->capturing = false;
     return;
   }
   state->last_timestamp_ns = 0;
@@ -751,6 +768,10 @@ void CycleFps(AppState* state) {
   state->camera.Stop();
   if (!state->camera.Start(state->config)) {
     LogError("could not restart camera with new fps");
+    // See NextLens: without this, `capturing` stays true over a camera that
+    // is actually stopped, and nothing can restart it until the app is left
+    // and reopened.
+    state->capturing = false;
     return;
   }
   state->last_timestamp_ns = 0;
@@ -781,6 +802,10 @@ void ResetProSettings(AppState* state) {
     state->camera.Stop();
     if (!state->camera.Start(state->config)) {
       LogError("could not restart camera after pro reset");
+      // See NextLens: without this, `capturing` stays true over a camera
+      // that is actually stopped, and nothing can restart it until the app
+      // is left and reopened.
+      state->capturing = false;
       return;
     }
     state->last_timestamp_ns = 0;
@@ -1015,6 +1040,22 @@ extern "C" void android_main(android_app* app) {
 
     if (!state.capturing) continue;
 
+    if (!state.camera.is_running()) {
+      // The camera disconnected (another app took priority, the HAL crashed,
+      // ...). Without this, the loop would keep polling a dead camera
+      // forever: no new frames, no error, capturing still true, with no way
+      // back short of leaving the app.
+      if (state.recorder.is_recording()) {
+        sensor_logger::LocationData end_loc = GetLocationData(app);
+        state.recorder.Stop(end_loc);
+        StopRecordingService(app);
+        state.stop_reason = "STOPPED - CAMERA DISCONNECTED";
+      }
+      state.camera.Stop();
+      state.capturing = false;
+      continue;
+    }
+
     state.camera.DrainResults(&capture_results);
     state.recorder.RecordCaptureResults(capture_results);
     if (!capture_results.empty()) state.last_result = capture_results.back();
@@ -1131,6 +1172,7 @@ extern "C" void android_main(android_app* app) {
         sensor_logger::LocationData end_loc = GetLocationData(app);
         state.recorder.Stop(end_loc);
         StopRecordingService(app);
+        state.camera.UnlockExposureAndFocus();
         state.stop_reason = "STOPPED - DISK FULL";
         __android_log_print(ANDROID_LOG_WARN, kTag,
                             "stopped: %lld bytes free, %lld written",
