@@ -30,16 +30,16 @@ path — the capture path is a real camera.
 | **The lock button** | pin the current metered exposure so recording starts on it, wherever the phone is pointed when the key is pressed; refused while recording |
 | **The retention button** | toggle `sharpest` / `all`; refused while recording |
 | **The lens button** | next rear lens; refused while recording |
-| **The PRO button** | open the panel for `shutter`, `fps` and `mains` — see below; refused while recording |
+| **The PRO button** | open the panel for `shutter`, `fps`, `mains`, `shift` and `residual` — see below; refused while recording |
 | **The sessions button** | view saved sessions, and delete them individually; refused while recording |
 | **Home** | leave, closing the session cleanly |
 
 The PRO panel has one row per setting that cycles its value on tap, the same
-way retention and lens already do, plus a **RESET TO AUTO** row that puts all
-three back at once. Unlike retention and lens, a change here is also written
-back to `capture.conf` (see [docs/settings.md](docs/settings.md)), so it
-survives the app being killed rather than reverting to whatever the file said
-when this session opened.
+way retention and lens already do, plus a **RESET** button beside **CLOSE**
+that puts all five back to their defaults at once. Unlike retention and lens,
+a change here is also written back to `capture.conf` (see
+[docs/settings.md](docs/settings.md)), so it survives the app being killed
+rather than reverting to whatever the file said when this session opened.
 
 Nothing that could lose a capture sits behind a touch. Deleting a session is:
 tap **DEL** next to it, then tap the same button again to confirm — one tap
