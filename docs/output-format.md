@@ -15,6 +15,7 @@ One directory per session under `<external files>/sessions/`:
 | `candidates.csv` | `timestamp_ns, sharpness, shift, residual` — one row per frame scored, kept or not |
 | `capture.csv` | `timestamp_ns, exposure_ns, sensitivity, focus_diopters, rolling_shutter_skew_ns, ae_state, awb_state, af_state, fps_range_min, fps_range_max, physical_id` — one row per frame the camera finished |
 | `thermal.csv` | `timestamp_ns, thermal_status, battery_temp_c` — sampled periodically, not per frame; `thermal_status` is `-1` below API 29 (see [ADR 9](adr/0009-log-thermal-status-and-battery-temperature.md)) |
+| `lifecycle.csv` | `timestamp_ns, event` — `event` is `background` or `foreground`, written on each transition while recording |
 | `session.json` | Which phone and camera it came from, counts, and units |
 
 Timestamps are nanoseconds, taken from the image rather than read on arrival, and

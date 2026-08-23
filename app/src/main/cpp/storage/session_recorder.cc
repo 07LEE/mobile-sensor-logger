@@ -138,13 +138,15 @@ bool SessionRecorder::Start(const std::string& root,
                    std::ios::out | std::ios::trunc);
   capture_.open(session_path_ + "/capture.csv", std::ios::out | std::ios::trunc);
   thermal_.open(session_path_ + "/thermal.csv", std::ios::out | std::ios::trunc);
+  lifecycle_.open(session_path_ + "/lifecycle.csv", std::ios::out | std::ios::trunc);
   if (!frames_.is_open() || !imu_.is_open() || !candidates_.is_open() ||
-      !capture_.is_open() || !thermal_.is_open()) {
+      !capture_.is_open() || !thermal_.is_open() || !lifecycle_.is_open()) {
     frames_.close();
     imu_.close();
     candidates_.close();
     capture_.close();
     thermal_.close();
+    lifecycle_.close();
     return false;
   }
 
@@ -157,6 +159,7 @@ bool SessionRecorder::Start(const std::string& root,
               "rolling_shutter_skew_ns,ae_state,awb_state,af_state,"
               "fps_range_min,fps_range_max,physical_id\n";
   thermal_ << "timestamp_ns,thermal_status,battery_temp_c\n";
+  lifecycle_ << "timestamp_ns,event\n";
 
   motion_.Reset();
   motion_.SetThresholds(config.min_shift, config.min_residual);
@@ -282,6 +285,17 @@ void SessionRecorder::RecordThermal(int64_t timestamp_ns,
   }
 }
 
+void SessionRecorder::RecordLifecycleEvent(int64_t timestamp_ns,
+                                           const char* event) {
+  if (!recording_) return;
+
+  lifecycle_ << timestamp_ns << ',' << event << '\n';
+  lifecycle_.flush();
+  if (!lifecycle_.good()) {
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "lifecycle.csv write failed");
+  }
+}
+
 void SessionRecorder::WriteCandidate(int64_t timestamp_ns, float sharpness) {
   candidates_ << timestamp_ns << ',' << sharpness << ',' << motion_.last_shift()
               << ',' << motion_.last_residual() << '\n';
@@ -364,6 +378,7 @@ void SessionRecorder::Stop(const LocationData& end_location) {
   candidates_.close();
   capture_.close();
   thermal_.close();
+  lifecycle_.close();
   WriteManifest(last_timestamp_ns_, end_location);
   recording_ = false;
 }

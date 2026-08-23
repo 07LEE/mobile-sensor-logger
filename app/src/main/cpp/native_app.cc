@@ -1086,11 +1086,18 @@ void HandleCommand(android_app* app, int32_t cmd) {
       // capture active in the background. Only stop capture if not recording.
       if (!state->recorder.is_recording()) {
         StopCapture(state);
+      } else {
+        state->recorder.RecordLifecycleEvent(state->last_timestamp_ns,
+                                             "background");
       }
       break;
 
     case APP_CMD_RESUME:
       if (state->display != EGL_NO_DISPLAY) StartCapture(state);
+      if (state->recorder.is_recording()) {
+        state->recorder.RecordLifecycleEvent(state->last_timestamp_ns,
+                                             "foreground");
+      }
       break;
 
     default:

@@ -97,6 +97,14 @@ class SessionRecorder {
   void RecordThermal(int64_t timestamp_ns, int32_t thermal_status,
                      float battery_temp_c);
 
+  // Foreground/background transitions (APP_CMD_PAUSE / APP_CMD_RESUME).
+  // Backgrounding relies on the Foreground Service to keep the camera alive
+  // (ADR 7); if that ever silently fails, the OS's own background camera
+  // restriction is a plausible cause of a capture.csv gap that has nothing to
+  // do with buffers or heat. Recorded so that question never again depends on
+  // remembering whether the app was backgrounded partway through a take.
+  void RecordLifecycleEvent(int64_t timestamp_ns, const char* event);
+
   // Writes any buffered frame, then closes the session.
   void Stop(const LocationData& end_location = LocationData());
 
@@ -160,6 +168,7 @@ class SessionRecorder {
   std::ofstream candidates_;
   std::ofstream capture_;
   std::ofstream thermal_;
+  std::ofstream lifecycle_;
 
   FrameMotion motion_;
   PendingFrame pending_;
