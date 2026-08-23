@@ -88,6 +88,15 @@ class SessionRecorder {
   // assumes held still, and the only way to know they did is to have them.
   void RecordCaptureResults(const std::vector<CaptureResult>& results);
 
+  // Device thermal state, sampled periodically rather than once: the point is
+  // to see whether a throttling event lines up with a gap in capture.csv, not
+  // just whether the device got hot at some point during the session.
+  // `thermal_status` is -1 where PowerManager's thermal API is unavailable
+  // (below API 29); `battery_temp_c` is a proxy for overall device heat, not
+  // the camera/SoC specifically, but is available on every supported version.
+  void RecordThermal(int64_t timestamp_ns, int32_t thermal_status,
+                     float battery_temp_c);
+
   // Writes any buffered frame, then closes the session.
   void Stop(const LocationData& end_location = LocationData());
 
@@ -150,6 +159,7 @@ class SessionRecorder {
   std::ofstream imu_;
   std::ofstream candidates_;
   std::ofstream capture_;
+  std::ofstream thermal_;
 
   FrameMotion motion_;
   PendingFrame pending_;

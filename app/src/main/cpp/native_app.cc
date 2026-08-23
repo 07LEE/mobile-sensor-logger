@@ -72,6 +72,12 @@ struct AppState {
   int free_space_countdown = 0;
   int64_t last_timestamp_ns = 0;
 
+  // Same cadence as free_space_countdown, for the same reason: cheap enough
+  // to poll often, but the point (see ADR 9) is lining a throttling event up
+  // against a capture.csv gap a couple of seconds wide, not catching the
+  // exact frame it started on.
+  int thermal_countdown = 0;
+
   // The camera's own account of the last frame it finished, kept whether or not
   // anything is being recorded. Watching exposure and focus settle is how the
   // decision to start is made, and they only settle while nothing is locked.
@@ -391,6 +397,113 @@ void StopRecordingService(android_app* app) {
   env->DeleteLocalRef(activity_class);
 }
 
+// Device thermal state (see ADR 9). Both readings are Java-only; there is no
+// NDK equivalent for PowerManager or BatteryManager. Read fresh each call
+// rather than cached, since the point is watching them change through a
+// recording, not a one-off snapshot.
+struct ThermalSample {
+  int32_t thermal_status = -1;    // PowerManager's enum; -1 below API 29.
+  float battery_temp_c = -1000.0f;  // Sentinel: unavailable/unreadable.
+};
+
+ThermalSample ReadThermalSample(android_app* app) {
+  ThermalSample out;
+  JNIEnv* env = nullptr;
+  app->activity->vm->AttachCurrentThread(&env, nullptr);
+
+  jobject activity = app->activity->javaGameActivity;
+  jclass activity_class = env->GetObjectClass(activity);
+  jclass context_class = env->FindClass("android/content/Context");
+
+  // Battery temperature: the sticky ACTION_BATTERY_CHANGED broadcast,
+  // fetched by registering a null receiver, which returns the last broadcast
+  // immediately instead of waiting for the next one.
+  jclass intent_filter_class = env->FindClass("android/content/IntentFilter");
+  jmethodID intent_filter_init =
+      env->GetMethodID(intent_filter_class, "<init>", "(Ljava/lang/String;)V");
+  jstring battery_action =
+      env->NewStringUTF("android.intent.action.BATTERY_CHANGED");
+  jobject filter =
+      env->NewObject(intent_filter_class, intent_filter_init, battery_action);
+
+  jmethodID register_receiver = env->GetMethodID(
+      activity_class, "registerReceiver",
+      "(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;)"
+      "Landroid/content/Intent;");
+  jobject battery_intent =
+      env->CallObjectMethod(activity, register_receiver, nullptr, filter);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    battery_intent = nullptr;
+  }
+
+  if (battery_intent != nullptr) {
+    jclass battery_manager_class = env->FindClass("android/os/BatteryManager");
+    jfieldID extra_temp_field = env->GetStaticFieldID(
+        battery_manager_class, "EXTRA_TEMPERATURE", "Ljava/lang/String;");
+    jstring extra_temp_key = static_cast<jstring>(
+        env->GetStaticObjectField(battery_manager_class, extra_temp_field));
+
+    jclass intent_class = env->GetObjectClass(battery_intent);
+    jmethodID get_int_extra = env->GetMethodID(
+        intent_class, "getIntExtra", "(Ljava/lang/String;I)I");
+    const jint temp_tenths =
+        env->CallIntMethod(battery_intent, get_int_extra, extra_temp_key, -1);
+    if (temp_tenths >= 0) out.battery_temp_c = temp_tenths / 10.0f;
+
+    env->DeleteLocalRef(extra_temp_key);
+    env->DeleteLocalRef(battery_manager_class);
+    env->DeleteLocalRef(intent_class);
+    env->DeleteLocalRef(battery_intent);
+  }
+  env->DeleteLocalRef(filter);
+  env->DeleteLocalRef(battery_action);
+  env->DeleteLocalRef(intent_filter_class);
+
+  // Thermal status: PowerManager.getCurrentThermalStatus(), API 29+ only.
+  jclass build_version_class = env->FindClass("android/os/Build$VERSION");
+  jfieldID sdk_int_field =
+      env->GetStaticFieldID(build_version_class, "SDK_INT", "I");
+  const jint sdk_int = env->GetStaticIntField(build_version_class, sdk_int_field);
+  env->DeleteLocalRef(build_version_class);
+
+  if (sdk_int >= 29) {
+    jfieldID power_service_field = env->GetStaticFieldID(
+        context_class, "POWER_SERVICE", "Ljava/lang/String;");
+    jstring power_service = static_cast<jstring>(
+        env->GetStaticObjectField(context_class, power_service_field));
+
+    jmethodID get_system_service = env->GetMethodID(
+        activity_class, "getSystemService",
+        "(Ljava/lang/String;)Ljava/lang/Object;");
+    jobject power_manager =
+        env->CallObjectMethod(activity, get_system_service, power_service);
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+      power_manager = nullptr;
+    }
+
+    if (power_manager != nullptr) {
+      jclass power_manager_class = env->GetObjectClass(power_manager);
+      jmethodID get_thermal_status = env->GetMethodID(
+          power_manager_class, "getCurrentThermalStatus", "()I");
+      if (get_thermal_status != nullptr) {
+        out.thermal_status =
+            env->CallIntMethod(power_manager, get_thermal_status);
+      } else {
+        env->ExceptionClear();
+      }
+      env->DeleteLocalRef(power_manager_class);
+      env->DeleteLocalRef(power_manager);
+    }
+    env->DeleteLocalRef(power_service);
+  }
+
+  env->DeleteLocalRef(context_class);
+  env->DeleteLocalRef(activity_class);
+  return out;
+}
+
 std::string FilesRoot(android_app* app) {
   return app->activity->externalDataPath != nullptr
              ? app->activity->externalDataPath
@@ -586,6 +699,9 @@ void ToggleRecording(AppState* state) {
                             state->camera.info(), state->config, start_loc)) {
     StartRecordingService(state->app);
     state->stop_reason = nullptr;
+    // So the first thermal sample lands promptly rather than waiting out
+    // however much of the countdown was left over from a previous session.
+    state->thermal_countdown = 0;
     __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
                         state->recorder.session_path().c_str());
   } else {
@@ -1184,6 +1300,17 @@ extern "C" void android_main(android_app* app) {
                             (long long)state.free_bytes,
                             (long long)state.recorder.written_frames());
       }
+    }
+
+    // Same cadence as the free-space check, and only while recording: this is
+    // for lining a throttling event up against a gap in capture.csv (ADR 9),
+    // which is meaningless outside a session.
+    if (state.recorder.is_recording() && --state.thermal_countdown <= 0) {
+      state.thermal_countdown = 60;
+      const ThermalSample thermal = ReadThermalSample(app);
+      state.recorder.RecordThermal(state.last_timestamp_ns,
+                                   thermal.thermal_status,
+                                   thermal.battery_temp_c);
     }
 
     if (state.display == EGL_NO_DISPLAY) continue;
