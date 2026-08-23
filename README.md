@@ -27,9 +27,19 @@ path — the capture path is a real camera.
 | --- | --- |
 | **Volume down** | start and stop recording |
 | **Volume up** | show or hide the camera |
+| **The lock button** | pin the current metered exposure so recording starts on it, wherever the phone is pointed when the key is pressed; refused while recording |
+| **The retention button** | toggle `sharpest` / `all`; refused while recording |
 | **The lens button** | next rear lens; refused while recording |
+| **The PRO button** | open the panel for `shutter`, `fps` and `mains` — see below; refused while recording |
 | **The sessions button** | view saved sessions, and delete them individually; refused while recording |
 | **Home** | leave, closing the session cleanly |
+
+The PRO panel has one row per setting that cycles its value on tap, the same
+way retention and lens already do, plus a **RESET TO AUTO** row that puts all
+three back at once. Unlike retention and lens, a change here is also written
+back to `capture.conf` (see [docs/settings.md](docs/settings.md)), so it
+survives the app being killed rather than reverting to whatever the file said
+when this session opened.
 
 Nothing that could lose a capture sits behind a touch. Deleting a session is:
 tap **DEL** next to it, then tap the same button again to confirm — one tap
@@ -58,19 +68,26 @@ REC 0:57   36 MIN LEFT      elapsed, and how long the free space lasts
 153 KEPT / 1696 SEEN        frames written against frames scored
 2.9GB USED 111.0GB FREE
 SHIFT 2/12  DIFF 4/6        movement against the thresholds that keep a frame
-4080X3060 ULTRAWIDE ALL
-1/30 ISO247 0.91M LOCKED    shutter, sensitivity, focus — held or still moving
+4080X3060
+1/30 ISO247 0.91M           shutter, sensitivity, focus — held or still moving
 DROP 0 NOIMG 0 IMU 36K      drops should be zero
 
-[ ULTRAWIDE 2.2MM - TAP ]
-[ SESSIONS - TAP ]
+[ LOCK ]
+[ RETENTION SHARP ]
+[ ULTRAWIDE 2.2MM ]
+[ PRO ]
+[ SESSIONS ]
 ```
 
 `MIN LEFT` is measured from the rate this capture is actually filling the disk,
-not estimated in advance. `LOCKED` appears once exposure, white balance and
-focus are held; watching them settle is how the moment to start is chosen.
-The lens button only appears on a phone with more than one rear camera; the
-sessions button is always there.
+not estimated in advance. The lock button reads **PINNED** once tapped, and
+brighter amber, so a stale pin is obvious rather than only readable from the
+label. The lens button only appears on a phone with more than one rear
+camera; the rest are always there, ordered by how often each gets touched
+around a recording — lock nearly every take, retention and lens less often,
+PRO rarer still since it is tuned once for a scene rather than every take, and
+sessions is an occasional housekeeping visit that sits furthest from a thumb
+reaching for the others in a hurry.
 
 ## Tested on
 

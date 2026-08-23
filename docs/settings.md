@@ -18,11 +18,21 @@ shift     = 0.12                # how far the picture may slide before a frame
 residual  = 0.06                # how much of it may stop matching
 shutter   = auto | 1/120        # longest exposure allowed once locked
 mains     = 60 | 50 | off       # how often the lights pulse, for flicker
+fps       = auto | 30           # pins the frame rate instead of letting AE pick
 ```
 
 ```bash
 adb push capture.conf /sdcard/Android/data/com.sensor.logger/files/
 ```
+
+`shutter`, `fps` and `mains` can also be changed from the phone itself, in the
+PRO panel (see the [README](../README.md)) — a tap cycles a row through a
+fixed list of values the same way retention and lens already do, and the
+change is written back to this same file, so it is picked up on the next
+recording without leaving the app. `capture`, `retention`, `lens`, `shift` and
+`residual` remain file-only: `retention` and `lens` already have their own
+toolbar buttons, and `shift`/`residual` are continuous values a fixed list of
+steps would misrepresent.
 
 Every rear camera is logged at startup with its focal length, so `lens` can name
 one by id. On a Galaxy S25 Ultra two are offered: `0` at 6.3mm and `2` at 2.2mm.
@@ -83,15 +93,40 @@ Every frame scored is logged whether or not its image was kept, so what a
 different threshold would have selected can be worked out from a capture already
 taken — see [candidates.csv](output-format.md#files).
 
+## Pinning the frame rate
+
+Left at `auto`, the frame rate is whatever the platform defaults to for the
+chosen resolution, and that default has turned out to be a range flexible
+enough to run below the sensor's ceiling in a dim room — auto exposure can
+trade frame rate for a longer exposure instead of raising sensitivity further.
+On the tested device the ceiling is a fixed 30fps in a bright room and a
+measured 24fps in a dim one, both with `fps` left at `auto`. `fps` pins one
+rate for the whole session, which makes the frame count a fixed recording
+time will produce arithmetic instead of a guess.
+
+This is about rate only, not exposure: shutter speed is capped separately by
+`shutter`, or is whatever the scene metered to, and does not move again once
+recording starts regardless of what `fps` is set to. Pinning `fps` below the
+sensor's ceiling does not shorten the exposure on its own — capping `shutter`
+is still the way to fight motion blur.
+
 ## Running out of room
 
 A frame at full resolution is around 19MB, and a session writes two or three a
 second, so plan on **2 to 3GB per minute**. The readout carries the measured
 rate and what is left at it.
 
-`dropped_frames` in `session.json` counts frames the writer could not keep up
-with. **It should be zero.** A run of drops means the capture is asking for more
-than the device can write.
+`dropped_frames` in `session.json` counts frames the writer's queue could not
+keep up with. **It should be zero.** A run of drops means the capture is
+asking for more than the device can write.
+
+`frames_lost_upstream` counts a different kind of loss that `dropped_frames`
+cannot see: frames the camera finished (counted in
+`camera_completed_captures`) that `AcquireFrame` never handed to `Record`
+because a newer image had already superseded them in the reader's buffer —
+which happens once the capture loop falls behind for long enough, `retention
+= all` being the mode most likely to. Both should be zero on a capture that
+kept up.
 
 Recording stops on its own with 2GB left, and the readout says
 `STOPPED - DISK FULL`. That margin exists because a session that runs the disk

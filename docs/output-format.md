@@ -13,7 +13,7 @@ One directory per session under `<external files>/sessions/`:
 | `frames.csv` | `timestamp_ns, filename, width, height, sharpness, chroma_layout, luma_row_stride, chroma_row_stride, chroma_pixel_stride, segment0_length, segment1_length, segment2_length` |
 | `imu.csv` | `timestamp_ns, sensor, x, y, z` — `sensor` is `accel` or `gyro` |
 | `candidates.csv` | `timestamp_ns, sharpness, shift, residual` — one row per frame scored, kept or not |
-| `capture.csv` | `timestamp_ns, exposure_ns, sensitivity, focus_diopters, rolling_shutter_skew_ns, ae_state, awb_state, af_state, physical_id` — one row per frame the camera finished |
+| `capture.csv` | `timestamp_ns, exposure_ns, sensitivity, focus_diopters, rolling_shutter_skew_ns, ae_state, awb_state, af_state, fps_range_min, fps_range_max, physical_id` — one row per frame the camera finished |
 | `session.json` | Which phone and camera it came from, counts, and units |
 
 Timestamps are nanoseconds, taken from the image rather than read on arrival, and
@@ -53,6 +53,14 @@ It also carries `camera_id`, `focal_length_mm`, `aperture` and
 `sensor_size_mm`. Frames from different lenses cannot be solved as one camera —
 an ultra-wide and a periscope disagree about focal length by a factor of
 eight — so this is what says which one a session is.
+
+It also carries what `capture.conf` the session actually ran with —
+`retention`, `min_shift`, `min_residual`, `shutter`, `mains_hz`, `fps` — next
+to what was measured — `written_frames`, `considered_frames`,
+`dropped_frames`, `camera_completed_captures`, `frames_lost_upstream`,
+`average_fps` — so a setting and its effect can be told apart later instead
+of assumed. See [settings.md](settings.md#running-out-of-room) for what the
+count fields mean and which should be zero.
 
 ### Calibration
 
@@ -123,6 +131,14 @@ whatever the camera moved during that, and correcting for it later needs the
 number. It is a property of the readout, **not** of the exposure, so a shorter
 exposure does not reduce it.
 
+`fps_range_min`/`fps_range_max` are what the platform actually ran the frame
+rate at for that frame — the default when `fps` in `capture.conf` is left at
+`auto`, since nothing else here asks for a rate. It is not necessarily
+constant across a session: the default is a range flexible enough for auto
+exposure to trade frame rate for a longer exposure in a dim room, so a scene
+that got darker partway through can show a lower rate for the rest of the
+session than it started at.
+
 ### Capping the exposure
 
 `shutter` shortens the exposure below what the scene metered to. Motion blur is
@@ -142,3 +158,7 @@ half-cycles bands the frame. The cap is rounded down to a multiple of one: at
 Left at `auto` the exposure is simply held wherever the scene metered, and the
 platform keeps doing this itself — the values it chose on the tested device,
 1/30 and 1/24, are both exact multiples of 8.333ms already.
+
+`fps` is a separate setting for a separate problem — see
+[settings.md](settings.md#pinning-the-frame-rate) — and pinning it does not
+cap the exposure on its own; `shutter` is still what fights motion blur.
