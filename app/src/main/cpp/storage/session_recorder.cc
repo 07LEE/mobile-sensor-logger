@@ -1,5 +1,6 @@
 #include "session_recorder.h"
 
+#include <android/log.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/system_properties.h>
@@ -14,6 +15,8 @@
 
 namespace sensor_logger {
 namespace {
+
+constexpr char kTag[] = "sensor_logger";
 
 // Every 4th pixel on both axes. Blur is a low-frequency effect, so the estimate
 // survives subsampling, and this has to run on every frame the camera produces.
@@ -60,11 +63,15 @@ void WriteLocationField(std::ofstream& out, const char* key,
   }
 }
 
+bool DirectoryExists(const std::string& path) {
+  struct stat info{};
+  return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+}
+
 bool MakeDirectory(const std::string& path) {
   if (mkdir(path.c_str(), 0755) == 0) return true;
   // Reusing an existing directory is fine; anything else is a real failure.
-  struct stat info{};
-  return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+  return DirectoryExists(path);
 }
 
 // Camera timestamps are nanoseconds on the boot clock, which is monotonic and
@@ -107,7 +114,21 @@ bool SessionRecorder::Start(const std::string& root,
   if (recording_) return false;
   if (!MakeDirectory(root)) return false;
 
-  session_path_ = root + "/" + SessionId(start_timestamp_ns);
+  std::string session_path = root + "/" + SessionId(start_timestamp_ns);
+  if (DirectoryExists(session_path)) {
+    // SessionId is derived from boot-relative milliseconds, which repeats
+    // across reboots, so two different boot cycles can land on the same id.
+    // MakeDirectory's "reuse an existing directory" tolerance exists for
+    // partial-mkdir races, not for this — silently reusing it here would
+    // truncate a previous session's CSVs. Disambiguate instead.
+    int suffix = 1;
+    std::string candidate;
+    do {
+      candidate = session_path + "_" + std::to_string(suffix++);
+    } while (DirectoryExists(candidate));
+    session_path = candidate;
+  }
+  session_path_ = session_path;
   if (!MakeDirectory(session_path_)) return false;
   if (!MakeDirectory(session_path_ + "/frames")) return false;
 
@@ -210,15 +231,22 @@ void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
     imu_ << sample.timestamp_ns << ',' << (sample.is_gyroscope ? "gyro" : "accel")
          << ',' << sample.x << ',' << sample.y << ',' << sample.z << '\n';
   }
-  imu_samples_ += static_cast<int64_t>(samples.size());
   imu_.flush();
+  // Counted only once the stream is known to have accepted it: once failbit
+  // is set, every subsequent `<<` is a silent no-op, and imu_samples() feeds
+  // straight into the manifest a workstation trusts as "every sample landed."
+  if (imu_.good()) {
+    imu_samples_ += static_cast<int64_t>(samples.size());
+  } else {
+    __android_log_print(ANDROID_LOG_ERROR, kTag,
+                        "imu.csv write failed; sample count now understates "
+                        "what was recorded");
+  }
 }
 
 void SessionRecorder::RecordCaptureResults(
     const std::vector<CaptureResult>& results) {
   if (!recording_ || results.empty()) return;
-
-  camera_completed_captures_ += static_cast<int64_t>(results.size());
 
   for (const CaptureResult& result : results) {
     capture_ << result.timestamp_ns << ',' << result.exposure_ns << ','
@@ -229,6 +257,13 @@ void SessionRecorder::RecordCaptureResults(
              << result.physical_id << '\n';
   }
   capture_.flush();
+  if (capture_.good()) {
+    camera_completed_captures_ += static_cast<int64_t>(results.size());
+  } else {
+    __android_log_print(ANDROID_LOG_ERROR, kTag,
+                        "capture.csv write failed; completed-capture count "
+                        "now understates what was recorded");
+  }
 }
 
 void SessionRecorder::WriteCandidate(int64_t timestamp_ns, float sharpness) {
@@ -442,13 +477,25 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << "  \"sensor_orientation_note\": \"degrees clockwise the frames "
               "must be rotated to appear upright; they are written as the "
               "sensor reads them\",\n"
-           << "  \"imu_note\": \"m/s^2 and rad/s in the device frame, on the "
-              "same clock as the frame timestamps\",\n"
+           << "  \"imu_note\": \"m/s^2 and rad/s in the device frame"
+           << (camera_.timestamps_realtime
+                   ? ", on the same clock as the frame timestamps\",\n"
+                   : "; this camera's timestamp source is NOT realtime, so "
+                     "frame and IMU timestamps are not on the same clock\",\n")
            << "  \"sharpness_metric\": \"variance of Laplacian on luma, "
               "subsampled; comparable only between frames of the same scene\",\n"
            << "  \"selection\": \"sharpest frame of each stretch; a stretch "
               "ends when the picture shifts or stops matching\"\n"
            << "}\n";
+  manifest.close();
+  if (!manifest) {
+    // Most likely to happen exactly when the disk filled up mid-session —
+    // the one moment a corrupt/partial session.json is worst, since it is
+    // the only record of what the run's settings and counts actually were.
+    __android_log_print(ANDROID_LOG_ERROR, kTag,
+                        "session.json for %s may be incomplete: write failed",
+                        session_path_.c_str());
+  }
 }
 
 namespace {

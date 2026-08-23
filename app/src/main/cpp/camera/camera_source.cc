@@ -382,6 +382,7 @@ bool CameraSource::ReadCamera(const char* id, ACameraMetadata* characteristics,
                                     &entry) == ACAMERA_OK &&
       entry.count > 0 &&
       entry.data.u8[0] == ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME;
+  out->timestamps_realtime = realtime;
   if (!realtime) {
     __android_log_print(ANDROID_LOG_WARN, kTag,
                         "camera %s timestamp source is not REALTIME", id);

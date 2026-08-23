@@ -2,6 +2,7 @@
 
 #include <android/log.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstdio>
 #include <fstream>
@@ -174,8 +175,15 @@ bool CaptureConfig::Save(const std::string& directory) const {
     file << "lens = main\n";
   }
 
-  file << "shift = " << min_shift << "\n";
-  file << "residual = " << min_residual << "\n";
+  // Clamped to what Load() actually accepts (0, 0.5) — otherwise a value that
+  // reached this struct out of range some other way would round-trip through
+  // capture.conf as something Load() then silently rejects back to whatever
+  // default was compiled in, with nothing on disk showing that happened.
+  const auto clamp_threshold = [](float v) {
+    return std::clamp(v, 0.001f, 0.499f);
+  };
+  file << "shift = " << clamp_threshold(min_shift) << "\n";
+  file << "residual = " << clamp_threshold(min_residual) << "\n";
 
   if (max_exposure_ns > 0) {
     file << "shutter = 1/" << (1000000000LL / max_exposure_ns) << "\n";

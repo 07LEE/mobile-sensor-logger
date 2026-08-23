@@ -43,6 +43,11 @@ void FrameWriter::Stop() {
   thread_.join();
 
   running_ = false;
+  // Under the same lock as every other access to these members (Submit,
+  // Run, TakeBuffer): thread_.join() having returned only means the writer
+  // thread is done, not that some other caller isn't concurrently in
+  // Submit()/TakeBuffer() on this object right now.
+  std::lock_guard<std::mutex> lock(mutex_);
   queue_.clear();
   spare_buffers_.clear();
   sink_ = nullptr;

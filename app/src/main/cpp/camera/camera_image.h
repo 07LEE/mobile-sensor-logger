@@ -23,6 +23,12 @@ struct CameraInfo {
   float sensor_height_mm = 0.0f;
   bool logical_multi_camera = false;
 
+  // Whether this camera's timestamps are on the same clock domain as
+  // ASensorEvent.timestamp (CLOCK_BOOTTIME). When false, nothing on this
+  // device lines the image and inertial streams up — the manifest's claim
+  // that they share a clock is only true when this is.
+  bool timestamps_realtime = true;
+
   // Where to put the lens so that everything from half that distance to
   // infinity is acceptably sharp, in diopters. On a short focal length this is
   // close enough to cover a room without ever hunting.

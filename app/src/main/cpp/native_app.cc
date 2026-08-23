@@ -610,6 +610,11 @@ void NextLens(AppState* state) {
   const std::string current = state->camera.info().id;
   state->camera.Stop();
 
+  // A pin holds whatever the old lens metered; the new lens has a different
+  // sensor and aperture, so carrying it over into the next LockExposureAndFocus
+  // would lock onto a baseline that was never measured on this lens.
+  state->exposure_pinned = false;
+
   state->config.lens = sensor_logger::Lens::kExplicit;
   state->config.lens_id = state->camera.NextRearCameraId(current);
 
