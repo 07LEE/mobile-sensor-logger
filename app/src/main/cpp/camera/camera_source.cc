@@ -592,7 +592,9 @@ bool CameraSource::SelectCamera(const CaptureConfig& config) {
                         info_.pre_correction_array[3]);
   } else {
     __android_log_print(ANDROID_LOG_WARN, kTag,
-                        "camera %s publishes no calibration",
+                        "camera %s publishes no calibration; 3D reconstruction "
+                        "will need self-calibration, see "
+                        "docs/calibration-guide.md",
                         camera_id_.c_str());
   }
 
