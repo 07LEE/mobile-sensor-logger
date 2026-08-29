@@ -22,6 +22,10 @@ namespace sensor_logger {
 // the change is also written straight back to capture.conf, so it survives
 // the app being killed and restarted instead of reverting to whatever was in
 // the file when this session opened — see CaptureConfig::Save.
+//
+// The calibration row below those is not one of these: it reports whether
+// the selected camera published Camera2 calibration, and is not tappable —
+// there is nothing here to cycle it to.
 class ProPanel {
  public:
   ProPanel() = default;
@@ -30,8 +34,9 @@ class ProPanel {
             GLint quad_color_location, GLuint vbo,
             const std::string& shutter_label, const std::string& fps_label,
             const std::string& mains_label, const std::string& shift_label,
-            const std::string& residual_label, int viewport_width,
-            int viewport_height,
+            const std::string& residual_label,
+            const std::string& calibration_label, bool has_calibration,
+            int viewport_width, int viewport_height,
             const std::function<void(const std::vector<std::string>&, int)>&
                 rasterize_text_fn);
 

@@ -549,11 +549,13 @@ void PreviewRenderer::DrawProPanel(const std::string& shutter_label,
                                    const std::string& fps_label,
                                    const std::string& mains_label,
                                    const std::string& shift_label,
-                                   const std::string& residual_label) {
+                                   const std::string& residual_label,
+                                   const std::string& calibration_label,
+                                   bool has_calibration) {
   pro_panel_.Draw(
       quad_program_, white_texture_, text_texture_, quad_color_location_, vbo_,
       shutter_label, fps_label, mains_label, shift_label, residual_label,
-      viewport_width_, viewport_height_,
+      calibration_label, has_calibration, viewport_width_, viewport_height_,
       [this](const std::vector<std::string>& lines, int columns) {
         RasterizeText(lines, columns);
       });

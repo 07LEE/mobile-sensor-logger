@@ -1380,6 +1380,10 @@ extern "C" void android_main(android_app* app) {
     std::snprintf(residual_label, sizeof(residual_label), "RESIDUAL: %.3F",
                   state.config.min_residual);
 
+    const bool has_calibration = state.camera.info().has_calibration;
+    const char* calib_label =
+        has_calibration ? "CALIB: OK" : "CALIB: NONE";
+
     constexpr float kGap = 0.015f;
     constexpr float kBtnHeight = 0.040f;
 
@@ -1470,7 +1474,8 @@ extern "C" void android_main(android_app* app) {
     }
     if (state.pro_panel_visible) {
       state.preview.DrawProPanel(shutter_label, fps_label, mains_label,
-                                 shift_label, residual_label);
+                                 shift_label, residual_label, calib_label,
+                                 has_calibration);
     }
 
     eglSwapBuffers(state.display, state.surface);

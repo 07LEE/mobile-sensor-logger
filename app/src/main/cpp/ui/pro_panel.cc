@@ -43,6 +43,7 @@ void ProPanel::Draw(
     GLint quad_color_location, GLuint vbo, const std::string& shutter_label,
     const std::string& fps_label, const std::string& mains_label,
     const std::string& shift_label, const std::string& residual_label,
+    const std::string& calibration_label, bool has_calibration,
     int viewport_width, int viewport_height,
     const std::function<void(const std::vector<std::string>&, int)>&
         rasterize_text_fn) {
@@ -137,6 +138,32 @@ void ProPanel::Draw(
                     row.label, cols, 26, vp_w * (kDialogRight - kDialogLeft - 0.06f) * 0.5f,
                     vp_h * kRowH * 0.5f, 0.92f, 0.60f, LabelAnchor::kLeft,
                     kDialogLeft + 0.06f, cy, vp_w, vp_h, 1.0f, 1.0f, 1.0f, 1.0f,
+                    rasterize_text_fn);
+
+    row_top = row_bottom - kRowGap;
+  }
+
+  // Calibration status: read-only, so it gets text colour instead of the
+  // tap-target highlight the five rows above use, to look distinct from
+  // them rather than like a sixth cyclable value.
+  {
+    const float row_bottom = row_top - kRowH;
+
+    glBindTexture(GL_TEXTURE_2D, white_texture);
+    glUniform4f(quad_color_location, 0.16f, 0.20f, 0.30f, 0.95f);
+    DrawQuad(quad_program, vbo, kDialogLeft + 0.03f, row_bottom,
+             kDialogRight - 0.03f, row_top, kFullUvs);
+
+    const int cols = static_cast<int>(calibration_label.size());
+    const float cy = (row_top + row_bottom) * 0.5f;
+    const float r = has_calibration ? 0.55f : 1.0f;
+    const float g = has_calibration ? 0.85f : 0.75f;
+    const float b = has_calibration ? 0.55f : 0.30f;
+    DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
+                    calibration_label, cols, 26,
+                    vp_w * (kDialogRight - kDialogLeft - 0.06f) * 0.5f,
+                    vp_h * kRowH * 0.5f, 0.92f, 0.60f, LabelAnchor::kLeft,
+                    kDialogLeft + 0.06f, cy, vp_w, vp_h, r, g, b, 1.0f,
                     rasterize_text_fn);
 
     row_top = row_bottom - kRowGap;

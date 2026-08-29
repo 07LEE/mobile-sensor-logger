@@ -96,7 +96,9 @@ class PreviewRenderer {
                     const std::string& fps_label,
                     const std::string& mains_label,
                     const std::string& shift_label,
-                    const std::string& residual_label);
+                    const std::string& residual_label,
+                    const std::string& calibration_label,
+                    bool has_calibration);
   bool ProPanelCloseContains(float x, float y) const;
   bool ProPanelShutterContains(float x, float y) const;
   bool ProPanelFpsContains(float x, float y) const;
