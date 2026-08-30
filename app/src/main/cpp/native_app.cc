@@ -1507,9 +1507,11 @@ extern "C" void android_main(android_app* app) {
     std::snprintf(residual_label, sizeof(residual_label), "RESIDUAL: %.3F",
                   state.config.min_residual);
 
+    // "INTRINSIC", not "CALIB" — the EXTRINSIC row right below it in the same
+    // panel made the older, vaguer label ambiguous between the two.
     const bool has_calibration = state.camera.info().has_calibration;
     const char* calib_label =
-        has_calibration ? "CALIB: OK" : "CALIB: NONE";
+        has_calibration ? "INTRINSIC: OK" : "INTRINSIC: NONE";
 
     constexpr float kGap = 0.015f;
     constexpr float kBtnHeight = 0.040f;
