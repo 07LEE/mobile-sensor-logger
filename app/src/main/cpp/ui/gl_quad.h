@@ -16,7 +16,11 @@ constexpr int kGlyphHeight = 7;
 constexpr int kCellWidth = 6;  // one column of spacing
 constexpr int kCellHeight = 8;
 constexpr int kTextColumns = 40;
-constexpr int kTextRows = 8;
+// 9, not 8: the compact HUD's status block can reach 9 lines at once (the 7
+// base lines, plus BATT, plus TAGS during an EXTRINSIC take) and
+// RasterizeText silently drops anything past this — found by an on-device
+// test where TAGS never appeared once BATT pushed the count past 8.
+constexpr int kTextRows = 9;
 
 // Uploads one textured quad's vertices to `vbo` and draws it with `program`
 // bound. `uvs` is 4 (u, v) pairs matching the vertex order: bottom-left,

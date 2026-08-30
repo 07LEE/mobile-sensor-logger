@@ -584,6 +584,16 @@ void PreviewRenderer::RasterizeText(const std::vector<std::string>& lines,
                        ? static_cast<int>(lines.size())
                        : kTextRows;
 
+  // Past here, anything beyond kTextRows is silently never drawn — found
+  // once already (TAGS on the HUD) by noticing it missing in a screenshot,
+  // not from any warning. This is that warning for next time.
+  if (static_cast<int>(lines.size()) > kTextRows) {
+    __android_log_print(ANDROID_LOG_WARN, "sensor_logger",
+                        "RasterizeText: %zu lines, only %d fit — dropping %d",
+                        lines.size(), kTextRows,
+                        static_cast<int>(lines.size()) - kTextRows);
+  }
+
   for (int row = 0; row < rows; ++row) {
     const std::string& line = lines[static_cast<size_t>(row)];
     const int length = static_cast<int>(line.size()) < columns
