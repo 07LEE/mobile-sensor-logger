@@ -463,6 +463,10 @@ bool PreviewRenderer::ProPanelResidualContains(float x, float y) const {
   return pro_panel_.ResidualTouched(x, y);
 }
 
+bool PreviewRenderer::ProPanelExtrinsicContains(float x, float y) const {
+  return pro_panel_.ExtrinsicTouched(x, y);
+}
+
 bool PreviewRenderer::ProPanelResetContains(float x, float y) const {
   return pro_panel_.ResetTouched(x, y);
 }

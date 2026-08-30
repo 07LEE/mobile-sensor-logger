@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "apriltag_detector.h"
 #include "camera_image.h"
 #include "camera_source.h"
 #include "capture_config.h"
@@ -21,6 +22,7 @@
 
 namespace {
 
+using sensor_logger::AprilTagDetector;
 using sensor_logger::CameraImageView;
 using sensor_logger::CameraSource;
 using sensor_logger::CaptureResult;
@@ -118,6 +120,17 @@ struct AppState {
   // calls, so a second read could put a different session at the tapped index
   // and delete the wrong one.
   std::vector<sensor_logger::SessionItem> cached_sessions;
+
+  // Set by the PRO panel's EXTRINSIC action — see
+  // docs/adr/0011-pro-panel-extrinsic-capture-button.md. `extrinsic_prev_retention`
+  // is what `config.retention` gets put back to when the recording it started
+  // stops; unlike the RETENTION toolbar button, this never reaches
+  // capture.conf, so the file reads the same after the take as before it.
+  bool extrinsic_mode_active = false;
+  Retention extrinsic_prev_retention = Retention::kSharpest;
+  int extrinsic_tags_detected = 0;
+  int extrinsic_detect_countdown = 0;
+  AprilTagDetector apriltag_detector;
 };
 
 // Runtime permission check, through JNI because there is no native entry
@@ -655,12 +668,24 @@ std::string Bytes(int64_t bytes) {
 // everything that has to be written after the last one.
 constexpr int64_t kMinimumFreeBytes = 2LL * 1000 * 1000 * 1000;
 
+// Puts retention and the EXTRINSIC HUD line back to how they were before
+// that mode's take started. Called from every place a recording can stop —
+// not just ToggleRecording below, but the disk-full auto-stop too, which
+// doesn't go through it.
+void RevertExtrinsicModeIfActive(AppState* state) {
+  if (!state->extrinsic_mode_active) return;
+  state->config.retention = state->extrinsic_prev_retention;
+  state->extrinsic_mode_active = false;
+  state->extrinsic_tags_detected = 0;
+}
+
 void ToggleRecording(AppState* state) {
   if (state->recorder.is_recording()) {
     sensor_logger::LocationData end_loc = GetLocationData(state->app);
     state->recorder.Stop(end_loc);
     StopRecordingService(state->app);
     state->camera.UnlockExposureAndFocus();
+    RevertExtrinsicModeIfActive(state);
     __android_log_print(
         ANDROID_LOG_INFO, kTag,
         "stopped: %lld written, %lld considered, %lld dropped, %lld lost "
@@ -706,6 +731,30 @@ void ToggleRecording(AppState* state) {
                         state->recorder.session_path().c_str());
   } else {
     LogError("could not start recording");
+  }
+}
+
+// Starts a camera-IMU extrinsic capture take: forces retention to `all` in
+// memory only (RevertExtrinsicModeIfActive above puts it back, and neither
+// side of that touches capture.conf), turns on the live `TAGS N/M` HUD line,
+// closes the PRO panel, and starts recording immediately — the same as
+// pressing volume-down. See docs/adr/0011-pro-panel-extrinsic-capture-button.md.
+void StartExtrinsicCapture(AppState* state) {
+  if (state->recorder.is_recording()) return;
+
+  state->extrinsic_prev_retention = state->config.retention;
+  state->config.retention = Retention::kAll;
+  state->extrinsic_mode_active = true;
+  state->extrinsic_tags_detected = 0;
+  state->extrinsic_detect_countdown = 0;
+  state->pro_panel_visible = false;
+
+  ToggleRecording(state);
+  if (!state->recorder.is_recording()) {
+    // ToggleRecording refused to start (no frame yet, not enough space) —
+    // nothing on that path knows to undo the switch to `all` above, so this
+    // is the only place left that can.
+    RevertExtrinsicModeIfActive(state);
   }
 }
 
@@ -1064,6 +1113,17 @@ std::vector<std::string> StatusLines(const AppState& state) {
                 (long long)(recorder.imu_samples() / 1000));
   lines.emplace_back(buffer);
 
+  // Only while an EXTRINSIC take is running — see
+  // docs/adr/0011-pro-panel-extrinsic-capture-button.md. The denominator
+  // comes from capture.conf's apriltag_cols/apriltag_rows, so it only means
+  // what it says if those match the physical target actually in frame.
+  if (state.extrinsic_mode_active) {
+    std::snprintf(buffer, sizeof(buffer), "TAGS %d/%d",
+                  state.extrinsic_tags_detected,
+                  state.config.apriltag_cols * state.config.apriltag_rows);
+    lines.emplace_back(buffer);
+  }
+
   return lines;
 }
 
@@ -1191,6 +1251,19 @@ extern "C" void android_main(android_app* app) {
     if (state.camera.AcquireFrame(&frame)) {
       state.last_timestamp_ns = frame.timestamp_ns;
       if (state.recorder.is_recording()) state.recorder.Record(frame);
+
+      // Every third frame, not every one: a live count is all the HUD shows,
+      // so this doesn't need to keep up with the capture loop the way
+      // Record() does, and running AprilTag detection on every full-resolution
+      // frame would compete with it for the same thread.
+      if (state.extrinsic_mode_active && frame.image.valid &&
+          --state.extrinsic_detect_countdown <= 0) {
+        state.extrinsic_detect_countdown = 3;
+        const sensor_logger::ImagePlane& luma = frame.image.planes[0];
+        state.extrinsic_tags_detected = state.apriltag_detector.Detect(
+            luma.data, frame.image.width, frame.image.height,
+            luma.row_stride);
+      }
     }
 
     const sensor_logger::InputEvents input = state.input.Poll(app);
@@ -1225,6 +1298,8 @@ extern "C" void android_main(android_app* app) {
           CycleShift(&state);
         } else if (state.preview.ProPanelResidualContains(input.x, input.y)) {
           CycleResidual(&state);
+        } else if (state.preview.ProPanelExtrinsicContains(input.x, input.y)) {
+          StartExtrinsicCapture(&state);
         } else if (state.preview.ProPanelResetContains(input.x, input.y)) {
           ResetProSettings(&state);
         }
@@ -1301,6 +1376,7 @@ extern "C" void android_main(android_app* app) {
         state.recorder.Stop(end_loc);
         StopRecordingService(app);
         state.camera.UnlockExposureAndFocus();
+        RevertExtrinsicModeIfActive(&state);
         state.stop_reason = "STOPPED - DISK FULL";
         __android_log_print(ANDROID_LOG_WARN, kTag,
                             "stopped: %lld bytes free, %lld written",

@@ -109,16 +109,25 @@ struct CaptureConfig {
   // move again regardless of what fps is set to.
   int32_t fixed_fps = 0;
 
+  // The AprilGrid the PRO panel's EXTRINSIC button expects to see — see
+  // docs/adr/0011-pro-panel-extrinsic-capture-button.md. Only used to size
+  // the `TAGS N/M` HUD denominator while that mode is active; detection
+  // itself doesn't need it. Defaults match
+  // data/kalibr_input/apriltag/target.yaml (5x7, tag36h11). File-only, like
+  // `capture` and `lens` — no toolbar cycle for it.
+  int32_t apriltag_cols = 5;
+  int32_t apriltag_rows = 7;
+
   // Loads from `<directory>/capture.conf`. Returns false if there was no file,
   // which leaves every field at its default.
   bool Load(const std::string& directory);
 
   // Writes the current values to `<directory>/capture.conf`, in the same
   // `key = value` form Load reads back. Called after the pro panel changes a
-  // setting, so the change outlives this run instead of reverting to
-  // whatever the file said when it was loaded — the same gap ToggleRetention
-  // and NextLens still have, since neither writes the file either. Returns
-  // false if the file could not be opened for writing.
+  // setting, and after ToggleRetention, so the change outlives this run
+  // instead of reverting to whatever the file said when it was loaded.
+  // NextLens still has that gap — it doesn't call this. Returns false if the
+  // file could not be opened for writing.
   bool Save(const std::string& directory) const;
 
   // For the manifest and the readout, so a capture says how it was taken.

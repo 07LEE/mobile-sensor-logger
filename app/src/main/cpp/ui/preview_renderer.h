@@ -105,6 +105,7 @@ class PreviewRenderer {
   bool ProPanelMainsContains(float x, float y) const;
   bool ProPanelShiftContains(float x, float y) const;
   bool ProPanelResidualContains(float x, float y) const;
+  bool ProPanelExtrinsicContains(float x, float y) const;
   bool ProPanelResetContains(float x, float y) const;
 
   // Render sessions overlay dialog with individual delete buttons and confirm

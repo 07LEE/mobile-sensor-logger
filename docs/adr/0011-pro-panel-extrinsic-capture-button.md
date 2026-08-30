@@ -37,9 +37,12 @@ Add an `EXTRINSIC` action button to the PRO panel — not a cycling settings
 row like `shutter`/`fps`/`mains`/`shift`/`residual`, but an action alongside
 `RESET`/`CLOSE`. Tapping it:
 
-1. Switches `retention` to `all` for this recording only (same session-only
-   scope as the existing `RETENTION` toggle button — not written to
-   `capture.conf`).
+1. Switches `retention` to `all` in memory for this recording only, without
+   calling `CaptureConfig::Save` — unlike the `RETENTION` toolbar button,
+   which does persist to `capture.conf` (`ToggleRetention` in
+   `native_app.cc`, despite `capture_config.h`'s stale comment claiming it
+   doesn't). `EXTRINSIC` deliberately skips that: the file should read the
+   same after this take as before it.
 2. Turns on live AprilTag detection, adding a `TAGS N/M` line to the HUD.
    `M` comes from two new `capture.conf` keys, `apriltag_cols` /
    `apriltag_rows` (default `5` / `7`, matching the grid already generated

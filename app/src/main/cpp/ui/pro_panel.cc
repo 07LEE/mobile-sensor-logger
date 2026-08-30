@@ -34,6 +34,10 @@ bool ProPanel::ResidualTouched(float x, float y) const {
   return Contains(residual_, x, y);
 }
 
+bool ProPanel::ExtrinsicTouched(float x, float y) const {
+  return Contains(extrinsic_, x, y);
+}
+
 bool ProPanel::ResetTouched(float x, float y) const {
   return Contains(reset_, x, y);
 }
@@ -165,6 +169,38 @@ void ProPanel::Draw(
                     vp_h * kRowH * 0.5f, 0.92f, 0.60f, LabelAnchor::kLeft,
                     kDialogLeft + 0.06f, cy, vp_w, vp_h, r, g, b, 1.0f,
                     rasterize_text_fn);
+
+    row_top = row_bottom - kRowGap;
+  }
+
+  // EXTRINSIC: an action, not a value — tapping it closes this panel and
+  // starts recording immediately. Warm/amber like the LOCK button's pinned
+  // state, to read as "this does something now" rather than blending in
+  // with the cyclable rows above it.
+  {
+    const float row_bottom = row_top - kRowH;
+
+    Rect px;
+    px.left = (kDialogLeft + 0.03f + 1.0f) * 0.5f * vp_w;
+    px.right = (kDialogRight - 0.03f + 1.0f) * 0.5f * vp_w;
+    px.top = (1.0f - row_top) * 0.5f * vp_h;
+    px.bottom = (1.0f - row_bottom) * 0.5f * vp_h;
+    extrinsic_ = px;
+
+    glBindTexture(GL_TEXTURE_2D, white_texture);
+    glUniform4f(quad_color_location, 0.45f, 0.30f, 0.08f, 0.95f);
+    DrawQuad(quad_program, vbo, kDialogLeft + 0.03f, row_bottom,
+             kDialogRight - 0.03f, row_top, kFullUvs);
+
+    const char* label = "[ EXTRINSIC CAPTURE ]";
+    const int cols = static_cast<int>(std::strlen(label));
+    const float cy = (row_top + row_bottom) * 0.5f;
+    DrawScaledLabel(quad_program, vbo, text_texture, quad_color_location,
+                    label, cols, 26,
+                    vp_w * (kDialogRight - kDialogLeft - 0.06f) * 0.5f,
+                    vp_h * kRowH * 0.5f, 0.92f, 0.60f, LabelAnchor::kCenter,
+                    (kDialogLeft + kDialogRight) * 0.5f, cy, vp_w, vp_h, 1.0f,
+                    1.0f, 1.0f, 1.0f, rasterize_text_fn);
 
     row_top = row_bottom - kRowGap;
   }

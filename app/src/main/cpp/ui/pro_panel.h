@@ -26,6 +26,12 @@ namespace sensor_logger {
 // The calibration row below those is not one of these: it reports whether
 // the selected camera published Camera2 calibration, and is not tappable —
 // there is nothing here to cycle it to.
+//
+// EXTRINSIC, below that, is not a cyclable value either — it's an action,
+// like RESET below it: tapping it starts a camera-IMU extrinsic capture
+// take immediately (retention forced to `all` for that recording only, live
+// AprilTag count in the HUD) rather than changing something and staying
+// open. See docs/adr/0011-pro-panel-extrinsic-capture-button.md.
 class ProPanel {
  public:
   ProPanel() = default;
@@ -46,6 +52,7 @@ class ProPanel {
   bool MainsTouched(float x, float y) const;
   bool ShiftTouched(float x, float y) const;
   bool ResidualTouched(float x, float y) const;
+  bool ExtrinsicTouched(float x, float y) const;
   bool ResetTouched(float x, float y) const;
 
  private:
@@ -64,6 +71,7 @@ class ProPanel {
   Rect mains_;
   Rect shift_;
   Rect residual_;
+  Rect extrinsic_;
   Rect reset_;
 };
 
