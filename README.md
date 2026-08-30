@@ -71,6 +71,7 @@ SHIFT 2/12  DIFF 4/6        movement against the thresholds that keep a frame
 4080X3060
 1/30 ISO247 0.91M           shutter, sensitivity, focus — held or still moving
 DROP 0 NOIMG 0 IMU 36K      drops should be zero
+BATT 78% 32.1C              shown whether or not anything is recording
 
 [ LOCK ]
 [ RETENTION SHARP ]

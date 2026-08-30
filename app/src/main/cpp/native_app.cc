@@ -48,6 +48,18 @@ void LogError(const char* what) {
   __android_log_print(ANDROID_LOG_ERROR, kTag, "%s", what);
 }
 
+// Device thermal and battery state (see ADR 9 for the thermal half). All
+// three readings are Java-only; there is no NDK equivalent for PowerManager
+// or BatteryManager. Read fresh each call rather than cached, since the point
+// is watching them change — through a recording for the first two, and
+// continuously for battery_percent, which is shown on the HUD whether or not
+// anything is recording.
+struct ThermalSample {
+  int32_t thermal_status = -1;      // PowerManager's enum; -1 below API 29.
+  float battery_temp_c = -1000.0f;  // Sentinel: unavailable/unreadable.
+  int32_t battery_percent = -1;     // Sentinel: unavailable/unreadable.
+};
+
 // Holds everything that depends on the window, so it can be torn down and
 // rebuilt when the app goes to background and comes back.
 struct AppState {
@@ -75,10 +87,13 @@ struct AppState {
   int64_t last_timestamp_ns = 0;
 
   // Same cadence as free_space_countdown, for the same reason: cheap enough
-  // to poll often, but the point (see ADR 9) is lining a throttling event up
-  // against a capture.csv gap a couple of seconds wide, not catching the
-  // exact frame it started on.
+  // to poll often. Polled whether or not anything is recording — battery
+  // percent is shown on the HUD all the time — but only written to
+  // thermal.csv while recording, where the point (see ADR 9) is lining a
+  // throttling event up against a capture.csv gap a couple of seconds wide,
+  // not catching the exact frame it started on.
   int thermal_countdown = 0;
+  ThermalSample last_thermal;
 
   // The camera's own account of the last frame it finished, kept whether or not
   // anything is being recorded. Watching exposure and focus settle is how the
@@ -410,15 +425,6 @@ void StopRecordingService(android_app* app) {
   env->DeleteLocalRef(activity_class);
 }
 
-// Device thermal state (see ADR 9). Both readings are Java-only; there is no
-// NDK equivalent for PowerManager or BatteryManager. Read fresh each call
-// rather than cached, since the point is watching them change through a
-// recording, not a one-off snapshot.
-struct ThermalSample {
-  int32_t thermal_status = -1;    // PowerManager's enum; -1 below API 29.
-  float battery_temp_c = -1000.0f;  // Sentinel: unavailable/unreadable.
-};
-
 ThermalSample ReadThermalSample(android_app* app) {
   ThermalSample out;
   JNIEnv* env = nullptr;
@@ -456,6 +462,14 @@ ThermalSample ReadThermalSample(android_app* app) {
         battery_manager_class, "EXTRA_TEMPERATURE", "Ljava/lang/String;");
     jstring extra_temp_key = static_cast<jstring>(
         env->GetStaticObjectField(battery_manager_class, extra_temp_field));
+    jfieldID extra_level_field = env->GetStaticFieldID(
+        battery_manager_class, "EXTRA_LEVEL", "Ljava/lang/String;");
+    jstring extra_level_key = static_cast<jstring>(
+        env->GetStaticObjectField(battery_manager_class, extra_level_field));
+    jfieldID extra_scale_field = env->GetStaticFieldID(
+        battery_manager_class, "EXTRA_SCALE", "Ljava/lang/String;");
+    jstring extra_scale_key = static_cast<jstring>(
+        env->GetStaticObjectField(battery_manager_class, extra_scale_field));
 
     jclass intent_class = env->GetObjectClass(battery_intent);
     jmethodID get_int_extra = env->GetMethodID(
@@ -464,7 +478,19 @@ ThermalSample ReadThermalSample(android_app* app) {
         env->CallIntMethod(battery_intent, get_int_extra, extra_temp_key, -1);
     if (temp_tenths >= 0) out.battery_temp_c = temp_tenths / 10.0f;
 
+    // level/scale rather than a direct percentage — Android's own battery
+    // icon does this arithmetic itself, there is no EXTRA_PERCENT.
+    const jint level =
+        env->CallIntMethod(battery_intent, get_int_extra, extra_level_key, -1);
+    const jint scale =
+        env->CallIntMethod(battery_intent, get_int_extra, extra_scale_key, -1);
+    if (level >= 0 && scale > 0) {
+      out.battery_percent = level * 100 / scale;
+    }
+
     env->DeleteLocalRef(extra_temp_key);
+    env->DeleteLocalRef(extra_level_key);
+    env->DeleteLocalRef(extra_scale_key);
     env->DeleteLocalRef(battery_manager_class);
     env->DeleteLocalRef(intent_class);
     env->DeleteLocalRef(battery_intent);
@@ -1113,6 +1139,27 @@ std::vector<std::string> StatusLines(const AppState& state) {
                 (long long)(recorder.imu_samples() / 1000));
   lines.emplace_back(buffer);
 
+  // Shown whether or not anything is recording — a long session (the
+  // multi-hour static IMU-noise captures this app has been used for) is
+  // exactly when battery is worth watching without leaving the app to check.
+  // Either field can be a sentinel (unavailable on this device/build); each
+  // is only printed when its own reading came back.
+  if (state.last_thermal.battery_percent >= 0 ||
+      state.last_thermal.battery_temp_c > -1000.0f) {
+    char percent[8] = "--%";
+    if (state.last_thermal.battery_percent >= 0) {
+      std::snprintf(percent, sizeof(percent), "%d%%",
+                    state.last_thermal.battery_percent);
+    }
+    char temp[12] = "--C";
+    if (state.last_thermal.battery_temp_c > -1000.0f) {
+      std::snprintf(temp, sizeof(temp), "%.1FC",
+                    state.last_thermal.battery_temp_c);
+    }
+    std::snprintf(buffer, sizeof(buffer), "BATT %s %s", percent, temp);
+    lines.emplace_back(buffer);
+  }
+
   // Only while an EXTRINSIC take is running — see
   // docs/adr/0011-pro-panel-extrinsic-capture-button.md. The denominator
   // comes from capture.conf's apriltag_cols/apriltag_rows, so it only means
@@ -1385,15 +1432,19 @@ extern "C" void android_main(android_app* app) {
       }
     }
 
-    // Same cadence as the free-space check, and only while recording: this is
-    // for lining a throttling event up against a gap in capture.csv (ADR 9),
-    // which is meaningless outside a session.
-    if (state.recorder.is_recording() && --state.thermal_countdown <= 0) {
+    // Same cadence as the free-space check. Polled here regardless of
+    // recording, for the HUD's battery percent; only written to thermal.csv
+    // while recording, where the point (ADR 9) is lining a throttling event
+    // up against a gap in capture.csv, which is meaningless outside a
+    // session.
+    if (--state.thermal_countdown <= 0) {
       state.thermal_countdown = 60;
-      const ThermalSample thermal = ReadThermalSample(app);
-      state.recorder.RecordThermal(state.last_timestamp_ns,
-                                   thermal.thermal_status,
-                                   thermal.battery_temp_c);
+      state.last_thermal = ReadThermalSample(app);
+      if (state.recorder.is_recording()) {
+        state.recorder.RecordThermal(state.last_timestamp_ns,
+                                     state.last_thermal.thermal_status,
+                                     state.last_thermal.battery_temp_c);
+      }
     }
 
     if (state.display == EGL_NO_DISPLAY) continue;
