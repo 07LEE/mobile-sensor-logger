@@ -1298,19 +1298,6 @@ extern "C" void android_main(android_app* app) {
     if (state.camera.AcquireFrame(&frame)) {
       state.last_timestamp_ns = frame.timestamp_ns;
       if (state.recorder.is_recording()) state.recorder.Record(frame);
-
-      // Every third frame, not every one: a live count is all the HUD shows,
-      // so this doesn't need to keep up with the capture loop the way
-      // Record() does, and running AprilTag detection on every full-resolution
-      // frame would compete with it for the same thread.
-      if (state.extrinsic_mode_active && frame.image.valid &&
-          --state.extrinsic_detect_countdown <= 0) {
-        state.extrinsic_detect_countdown = 3;
-        const sensor_logger::ImagePlane& luma = frame.image.planes[0];
-        state.extrinsic_tags_detected = state.apriltag_detector.Detect(
-            luma.data, frame.image.width, frame.image.height,
-            luma.row_stride);
-      }
     }
 
     const sensor_logger::InputEvents input = state.input.Poll(app);
@@ -1452,6 +1439,24 @@ extern "C" void android_main(android_app* app) {
     if (state.preview_visible) {
       if (state.camera.AcquirePreviewFrame(&preview_image)) {
         state.preview.UploadCamera(preview_image);
+
+        // The preview stream (kMaxPreviewWidth, ~1280px) rather than the
+        // capture frame (4080x3060) AcquireFrame handed to Record() above —
+        // running AprilTag detection at full capture resolution visibly
+        // stuttered the preview on-device, competing with the render loop on
+        // the same thread. A live tag count doesn't need sub-pixel corners,
+        // just a rough read every third frame, so the much smaller image is
+        // plenty. This also means the count only updates while the picture
+        // is shown, which is fine — aiming during a calibration take needs
+        // the picture up anyway.
+        if (state.extrinsic_mode_active && preview_image.valid &&
+            --state.extrinsic_detect_countdown <= 0) {
+          state.extrinsic_detect_countdown = 3;
+          const sensor_logger::ImagePlane& luma = preview_image.planes[0];
+          state.extrinsic_tags_detected = state.apriltag_detector.Detect(
+              luma.data, preview_image.width, preview_image.height,
+              luma.row_stride);
+        }
       }
     } else {
       state.camera.DrainPreview();
