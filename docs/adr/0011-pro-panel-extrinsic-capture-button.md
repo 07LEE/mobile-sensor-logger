@@ -6,6 +6,11 @@ Date: 2026-08-29
 
 Accepted.
 
+The AprilTag-detection half is superseded by
+[0012-remove-on-device-apriltag-detection](0012-remove-on-device-apriltag-detection.md).
+The `EXTRINSIC` button itself — switching `retention` to `all` and starting
+recording immediately — still holds.
+
 ## Context
 
 Camera-to-IMU extrinsic calibration is computed on a workstation with Kalibr,
