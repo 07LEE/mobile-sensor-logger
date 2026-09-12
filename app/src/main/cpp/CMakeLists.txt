@@ -8,16 +8,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # library is how the native entry point gets a window and an event loop.
 find_package(game-activity REQUIRED CONFIG)
 
-# apriltag: vendored as a submodule pinned to a specific commit (see
-# docs/adr/0011-pro-panel-extrinsic-capture-button.md), not found on the
-# system — nothing on Android would provide it. Static, and its own demos/
-# Python wrapper are off: nothing here needs them, and BUILD_EXAMPLES would
-# otherwise try to find OpenCV.
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_PYTHON_WRAPPER OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/apriltag EXCLUDE_FROM_ALL)
-
 # GameActivity's JNI entry point lives in a static library and nothing in our
 # code calls it, so the linker would drop it and the activity would fail to
 # start with UnsatisfiedLinkError. Naming it as undefined keeps it, and the rest
@@ -29,7 +19,6 @@ add_library(sensor_logger SHARED
     native_app.cc
     camera/camera_source.cc
     camera/capture_config.cc
-    calibration/apriltag_detector.cc
     pipeline/frame_motion.cc
     pipeline/pending_frame.cc
     pipeline/sharpness.cc
@@ -48,7 +37,6 @@ target_include_directories(sensor_logger PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/ui
     ${CMAKE_CURRENT_SOURCE_DIR}/camera
-    ${CMAKE_CURRENT_SOURCE_DIR}/calibration
     ${CMAKE_CURRENT_SOURCE_DIR}/sensors
     ${CMAKE_CURRENT_SOURCE_DIR}/storage
     ${CMAKE_CURRENT_SOURCE_DIR}/pipeline
@@ -62,7 +50,6 @@ target_link_options(sensor_logger PRIVATE "-Wl,-z,max-page-size=16384")
 
 target_link_libraries(sensor_logger
     game-activity::game-activity_static
-    apriltag
     camera2ndk
     mediandk
     android

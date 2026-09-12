@@ -141,16 +141,6 @@ bool CaptureConfig::Load(const std::string& directory) {
                             "capture.conf: cannot read retention '%s'",
                             value.c_str());
       }
-    } else if (key == "apriltag_cols" || key == "apriltag_rows") {
-      const int parsed = std::atoi(value.c_str());
-      if (parsed > 0) {
-        (key == "apriltag_cols" ? apriltag_cols : apriltag_rows) = parsed;
-      } else {
-        __android_log_print(ANDROID_LOG_WARN, kTag,
-                            "capture.conf: %s wants a positive integer, got "
-                            "'%s'",
-                            key.c_str(), value.c_str());
-      }
     }
   }
 
@@ -212,9 +202,6 @@ bool CaptureConfig::Save(const std::string& directory) const {
   } else {
     file << "fps = auto\n";
   }
-
-  file << "apriltag_cols = " << apriltag_cols << "\n";
-  file << "apriltag_rows = " << apriltag_rows << "\n";
 
   return file.good();
 }
