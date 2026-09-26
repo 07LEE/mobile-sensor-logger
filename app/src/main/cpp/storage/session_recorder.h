@@ -13,18 +13,11 @@
 #include "frame_motion.h"
 #include "frame_writer.h"
 #include "imu_source.h"
+#include "location.h"
 #include "pending_frame.h"
 #include "session_item.h"
 
 namespace sensor_logger {
-
-struct LocationData {
-  bool valid = false;
-  double latitude = 0.0;
-  double longitude = 0.0;
-  double altitude_m = 0.0;
-  float accuracy_m = 0.0f;
-};
 
 // Writes one capture session to disk.
 //

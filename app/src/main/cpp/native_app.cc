@@ -14,9 +14,14 @@
 #include "camera_image.h"
 #include "camera_source.h"
 #include "capture_config.h"
+#include "device_status.h"
 #include "imu_source.h"
 #include "input.h"
+#include "location.h"
+#include "log.h"
+#include "permissions.h"
 #include "preview_renderer.h"
+#include "recording_service.h"
 #include "session_recorder.h"
 
 namespace {
@@ -35,28 +40,19 @@ using sensor_logger::PendingFrame;
 using sensor_logger::PreviewRenderer;
 using sensor_logger::SessionRecorder;
 using sensor_logger::SessionsOverlay;
+using sensor_logger::GetLocationData;
+using sensor_logger::HasCameraPermission;
+using sensor_logger::LocationData;
+using sensor_logger::LogError;
+using sensor_logger::LogInfo;
+using sensor_logger::LogOptionalPermissions;
+using sensor_logger::ReadThermalSample;
+using sensor_logger::RequestCameraPermission;
+using sensor_logger::StartRecordingService;
+using sensor_logger::StopRecordingService;
+using sensor_logger::ThermalSample;
 
 constexpr char kTag[] = "sensor_logger";
-
-void LogInfo(const char* what) {
-  __android_log_print(ANDROID_LOG_INFO, kTag, "%s", what);
-}
-
-void LogError(const char* what) {
-  __android_log_print(ANDROID_LOG_ERROR, kTag, "%s", what);
-}
-
-// Device thermal and battery state (see ADR 9 for the thermal half). All
-// three readings are Java-only; there is no NDK equivalent for PowerManager
-// or BatteryManager. Read fresh each call rather than cached, since the point
-// is watching them change — through a recording for the first two, and
-// continuously for battery_percent, which is shown on the HUD whether or not
-// anything is recording.
-struct ThermalSample {
-  int32_t thermal_status = -1;      // PowerManager's enum; -1 below API 29.
-  float battery_temp_c = -1000.0f;  // Sentinel: unavailable/unreadable.
-  int32_t battery_percent = -1;     // Sentinel: unavailable/unreadable.
-};
 
 // Holds everything that depends on the window, so it can be torn down and
 // rebuilt when the app goes to background and comes back.
@@ -142,401 +138,6 @@ struct AppState {
   bool extrinsic_mode_active = false;
   Retention extrinsic_prev_retention = Retention::kSharpest;
 };
-
-// Runtime permission check, through JNI because there is no native entry
-// point for it.
-bool HasPermission(android_app* app, const char* permission) {
-  JNIEnv* env = nullptr;
-  app->activity->vm->AttachCurrentThread(&env, nullptr);
-
-  jobject activity = app->activity->javaGameActivity;
-  jclass context_class = env->GetObjectClass(activity);
-  jmethodID check_permission = env->GetMethodID(
-      context_class, "checkSelfPermission", "(Ljava/lang/String;)I");
-
-  jstring permission_str = env->NewStringUTF(permission);
-  const jint result = env->CallIntMethod(activity, check_permission, permission_str);
-
-  env->DeleteLocalRef(permission_str);
-  env->DeleteLocalRef(context_class);
-
-  // PackageManager.PERMISSION_GRANTED
-  return result == 0;
-}
-
-bool HasCameraPermission(android_app* app) {
-  return HasPermission(app, "android.permission.CAMERA");
-}
-
-// POST_NOTIFICATIONS and the location permissions are requested alongside
-// CAMERA (see RequestCameraPermission below) but nothing else ever checks
-// whether they actually landed. A denial otherwise shows up only as the
-// background-recording notification silently never appearing, or every
-// session's location fields silently staying null — logged once, when camera
-// permission first comes back granted, so a denial is at least diagnosable
-// from logcat instead of indistinguishable from "no fix yet".
-void LogOptionalPermissions(android_app* app) {
-  if (!HasPermission(app, "android.permission.POST_NOTIFICATIONS")) {
-    LogInfo("POST_NOTIFICATIONS denied; the background-recording notification will not show");
-  }
-  if (!HasPermission(app, "android.permission.ACCESS_FINE_LOCATION") &&
-      !HasPermission(app, "android.permission.ACCESS_COARSE_LOCATION")) {
-    LogInfo("location permissions denied; sessions will have no start/end location");
-  }
-}
-
-void RequestCameraPermission(android_app* app) {
-  JNIEnv* env = nullptr;
-  app->activity->vm->AttachCurrentThread(&env, nullptr);
-
-  jobject activity = app->activity->javaGameActivity;
-  jclass activity_class = env->GetObjectClass(activity);
-  jmethodID request = env->GetMethodID(activity_class, "requestPermissions",
-                                       "([Ljava/lang/String;I)V");
-
-  jclass string_class = env->FindClass("java/lang/String");
-  jobjectArray permissions = env->NewObjectArray(4, string_class, nullptr);
-  jstring cam_perm = env->NewStringUTF("android.permission.CAMERA");
-  jstring notif_perm = env->NewStringUTF("android.permission.POST_NOTIFICATIONS");
-  jstring fine_loc = env->NewStringUTF("android.permission.ACCESS_FINE_LOCATION");
-  jstring coarse_loc = env->NewStringUTF("android.permission.ACCESS_COARSE_LOCATION");
-
-  env->SetObjectArrayElement(permissions, 0, cam_perm);
-  env->SetObjectArrayElement(permissions, 1, notif_perm);
-  env->SetObjectArrayElement(permissions, 2, fine_loc);
-  env->SetObjectArrayElement(permissions, 3, coarse_loc);
-
-  env->CallVoidMethod(activity, request, permissions, 0);
-
-  env->DeleteLocalRef(cam_perm);
-  env->DeleteLocalRef(notif_perm);
-  env->DeleteLocalRef(fine_loc);
-  env->DeleteLocalRef(coarse_loc);
-  env->DeleteLocalRef(permissions);
-  env->DeleteLocalRef(string_class);
-  env->DeleteLocalRef(activity_class);
-}
-
-sensor_logger::LocationData GetLocationData(android_app* app) {
-  sensor_logger::LocationData loc;
-  JNIEnv* env = nullptr;
-  app->activity->vm->AttachCurrentThread(&env, nullptr);
-
-  jobject activity = app->activity->javaGameActivity;
-  jclass activity_class = env->GetObjectClass(activity);
-
-  jstring service_name = env->NewStringUTF("location");
-  jmethodID get_system_service = env->GetMethodID(
-      activity_class, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
-  jobject loc_manager = env->CallObjectMethod(activity, get_system_service, service_name);
-  env->DeleteLocalRef(service_name);
-
-  if (loc_manager != nullptr) {
-    jclass loc_manager_class = env->GetObjectClass(loc_manager);
-
-    jstring gps_provider = env->NewStringUTF("gps");
-    jstring network_provider = env->NewStringUTF("network");
-
-    jmethodID get_last_known = env->GetMethodID(
-        loc_manager_class, "getLastKnownLocation",
-        "(Ljava/lang/String;)Landroid/location/Location;");
-
-    jobject location = env->CallObjectMethod(loc_manager, get_last_known, gps_provider);
-    if (location == nullptr) {
-      env->ExceptionClear();
-      location = env->CallObjectMethod(loc_manager, get_last_known, network_provider);
-    }
-
-    if (location != nullptr) {
-      jclass loc_class = env->GetObjectClass(location);
-      jmethodID get_lat = env->GetMethodID(loc_class, "getLatitude", "()D");
-      jmethodID get_lon = env->GetMethodID(loc_class, "getLongitude", "()D");
-      jmethodID get_alt = env->GetMethodID(loc_class, "getAltitude", "()D");
-      jmethodID get_acc = env->GetMethodID(loc_class, "getAccuracy", "()F");
-
-      loc.valid = true;
-      loc.latitude = env->CallDoubleMethod(location, get_lat);
-      loc.longitude = env->CallDoubleMethod(location, get_lon);
-      loc.altitude_m = env->CallDoubleMethod(location, get_alt);
-      loc.accuracy_m = env->CallFloatMethod(location, get_acc);
-
-      env->DeleteLocalRef(loc_class);
-      env->DeleteLocalRef(location);
-    } else {
-      env->ExceptionClear();
-    }
-
-    env->DeleteLocalRef(gps_provider);
-    env->DeleteLocalRef(network_provider);
-    env->DeleteLocalRef(loc_manager_class);
-    env->DeleteLocalRef(loc_manager);
-  } else {
-    env->ExceptionClear();
-  }
-
-  env->DeleteLocalRef(activity_class);
-  return loc;
-}
-
-jclass LoadRecordingServiceClass(JNIEnv* env, jobject activity) {
-  jclass activity_class = env->GetObjectClass(activity);
-  jmethodID get_class_loader = env->GetMethodID(
-      activity_class, "getClassLoader", "()Ljava/lang/ClassLoader;");
-  jobject class_loader = env->CallObjectMethod(activity, get_class_loader);
-  jclass class_loader_class = env->GetObjectClass(class_loader);
-  jmethodID load_class = env->GetMethodID(
-      class_loader_class, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
-
-  jstring class_name = env->NewStringUTF("com.sensor.logger.RecordingService");
-  jclass service_class = static_cast<jclass>(
-      env->CallObjectMethod(class_loader, load_class, class_name));
-
-  env->DeleteLocalRef(class_name);
-  env->DeleteLocalRef(class_loader_class);
-  env->DeleteLocalRef(class_loader);
-  env->DeleteLocalRef(activity_class);
-
-  if (env->ExceptionCheck()) {
-    env->ExceptionClear();
-    return nullptr;
-  }
-  return service_class;
-}
-
-// Cached as a global ref after the first successful resolution. A jclass
-// local ref from LoadRecordingServiceClass is only valid for the JNIEnv call
-// that produced it, but Start/StopRecordingService look this up on every
-// single recording start and stop — a full getClassLoader()->loadClass()
-// reflection round trip each time for something that never changes at
-// runtime.
-jclass CachedRecordingServiceClass(JNIEnv* env, jobject activity) {
-  static jclass cached = nullptr;
-  if (cached != nullptr) return cached;
-
-  jclass local = LoadRecordingServiceClass(env, activity);
-  if (local == nullptr) return nullptr;
-
-  cached = static_cast<jclass>(env->NewGlobalRef(local));
-  env->DeleteLocalRef(local);
-  return cached;
-}
-
-// Builds `new Intent(activity, service_class)`. Caller deletes the local ref.
-jobject BuildServiceIntent(JNIEnv* env, jobject activity, jclass service_class) {
-  jclass intent_class = env->FindClass("android/content/Intent");
-  jmethodID intent_init = env->GetMethodID(
-      intent_class, "<init>", "(Landroid/content/Context;Ljava/lang/Class;)V");
-  jobject intent = env->NewObject(intent_class, intent_init, activity, service_class);
-  env->DeleteLocalRef(intent_class);
-  return intent;
-}
-
-void StartRecordingService(android_app* app) {
-  JNIEnv* env = nullptr;
-  app->activity->vm->AttachCurrentThread(&env, nullptr);
-
-  jobject activity = app->activity->javaGameActivity;
-  jclass activity_class = env->GetObjectClass(activity);
-  jclass service_class = CachedRecordingServiceClass(env, activity);
-
-  if (service_class != nullptr) {
-    jobject intent = BuildServiceIntent(env, activity, service_class);
-
-    jmethodID start_service = env->GetMethodID(
-        activity_class, "startForegroundService",
-        "(Landroid/content/Intent;)Landroid/content/ComponentName;");
-    if (start_service == nullptr) {
-      env->ExceptionClear();
-      start_service = env->GetMethodID(
-          activity_class, "startService",
-          "(Landroid/content/Intent;)Landroid/content/ComponentName;");
-    }
-
-    if (start_service != nullptr) {
-      env->CallObjectMethod(activity, start_service, intent);
-      if (env->ExceptionCheck()) {
-        // E.g. ForegroundServiceStartNotAllowedException on Android 12+ when
-        // the process is in a restricted background state. Clear it before
-        // any further JNI call on this thread: leaving one pending is
-        // undefined behavior per the JNI spec, not just for this call.
-        env->ExceptionClear();
-        LogError("startForegroundService threw");
-      }
-    } else {
-      env->ExceptionClear();
-    }
-
-    env->DeleteLocalRef(intent);
-  }
-
-  env->DeleteLocalRef(activity_class);
-}
-
-void StopRecordingService(android_app* app) {
-  JNIEnv* env = nullptr;
-  app->activity->vm->AttachCurrentThread(&env, nullptr);
-
-  jobject activity = app->activity->javaGameActivity;
-  jclass activity_class = env->GetObjectClass(activity);
-  jclass service_class = CachedRecordingServiceClass(env, activity);
-
-  if (service_class != nullptr) {
-    jobject intent = BuildServiceIntent(env, activity, service_class);
-
-    jfieldID action_stop_field = env->GetStaticFieldID(
-        service_class, "ACTION_STOP", "Ljava/lang/String;");
-    if (action_stop_field != nullptr) {
-      jstring action_stop = static_cast<jstring>(
-          env->GetStaticObjectField(service_class, action_stop_field));
-      jclass intent_class = env->GetObjectClass(intent);
-      jmethodID set_action = env->GetMethodID(
-          intent_class, "setAction",
-          "(Ljava/lang/String;)Landroid/content/Intent;");
-      env->CallObjectMethod(intent, set_action, action_stop);
-      env->DeleteLocalRef(action_stop);
-      env->DeleteLocalRef(intent_class);
-    } else {
-      // Field lookup failed — e.g. RecordingService was resolved but no
-      // longer defines ACTION_STOP. Clear the pending exception before any
-      // further JNI call: leaving one set is undefined behavior per the JNI
-      // spec, not just for this call but for whatever runs next.
-      env->ExceptionClear();
-    }
-
-    jmethodID start_service = env->GetMethodID(
-        activity_class, "startService",
-        "(Landroid/content/Intent;)Landroid/content/ComponentName;");
-    if (start_service != nullptr) {
-      env->CallObjectMethod(activity, start_service, intent);
-      if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-        LogError("startService (stop) threw");
-      }
-    }
-
-    env->DeleteLocalRef(intent);
-  }
-
-  env->DeleteLocalRef(activity_class);
-}
-
-ThermalSample ReadThermalSample(android_app* app) {
-  ThermalSample out;
-  JNIEnv* env = nullptr;
-  app->activity->vm->AttachCurrentThread(&env, nullptr);
-
-  jobject activity = app->activity->javaGameActivity;
-  jclass activity_class = env->GetObjectClass(activity);
-  jclass context_class = env->FindClass("android/content/Context");
-
-  // Battery temperature: the sticky ACTION_BATTERY_CHANGED broadcast,
-  // fetched by registering a null receiver, which returns the last broadcast
-  // immediately instead of waiting for the next one.
-  jclass intent_filter_class = env->FindClass("android/content/IntentFilter");
-  jmethodID intent_filter_init =
-      env->GetMethodID(intent_filter_class, "<init>", "(Ljava/lang/String;)V");
-  jstring battery_action =
-      env->NewStringUTF("android.intent.action.BATTERY_CHANGED");
-  jobject filter =
-      env->NewObject(intent_filter_class, intent_filter_init, battery_action);
-
-  jmethodID register_receiver = env->GetMethodID(
-      activity_class, "registerReceiver",
-      "(Landroid/content/BroadcastReceiver;Landroid/content/IntentFilter;)"
-      "Landroid/content/Intent;");
-  jobject battery_intent =
-      env->CallObjectMethod(activity, register_receiver, nullptr, filter);
-  if (env->ExceptionCheck()) {
-    env->ExceptionClear();
-    battery_intent = nullptr;
-  }
-
-  if (battery_intent != nullptr) {
-    jclass battery_manager_class = env->FindClass("android/os/BatteryManager");
-    jfieldID extra_temp_field = env->GetStaticFieldID(
-        battery_manager_class, "EXTRA_TEMPERATURE", "Ljava/lang/String;");
-    jstring extra_temp_key = static_cast<jstring>(
-        env->GetStaticObjectField(battery_manager_class, extra_temp_field));
-    jfieldID extra_level_field = env->GetStaticFieldID(
-        battery_manager_class, "EXTRA_LEVEL", "Ljava/lang/String;");
-    jstring extra_level_key = static_cast<jstring>(
-        env->GetStaticObjectField(battery_manager_class, extra_level_field));
-    jfieldID extra_scale_field = env->GetStaticFieldID(
-        battery_manager_class, "EXTRA_SCALE", "Ljava/lang/String;");
-    jstring extra_scale_key = static_cast<jstring>(
-        env->GetStaticObjectField(battery_manager_class, extra_scale_field));
-
-    jclass intent_class = env->GetObjectClass(battery_intent);
-    jmethodID get_int_extra = env->GetMethodID(
-        intent_class, "getIntExtra", "(Ljava/lang/String;I)I");
-    const jint temp_tenths =
-        env->CallIntMethod(battery_intent, get_int_extra, extra_temp_key, -1);
-    if (temp_tenths >= 0) out.battery_temp_c = temp_tenths / 10.0f;
-
-    // level/scale rather than a direct percentage — Android's own battery
-    // icon does this arithmetic itself, there is no EXTRA_PERCENT.
-    const jint level =
-        env->CallIntMethod(battery_intent, get_int_extra, extra_level_key, -1);
-    const jint scale =
-        env->CallIntMethod(battery_intent, get_int_extra, extra_scale_key, -1);
-    if (level >= 0 && scale > 0) {
-      out.battery_percent = level * 100 / scale;
-    }
-
-    env->DeleteLocalRef(extra_temp_key);
-    env->DeleteLocalRef(extra_level_key);
-    env->DeleteLocalRef(extra_scale_key);
-    env->DeleteLocalRef(battery_manager_class);
-    env->DeleteLocalRef(intent_class);
-    env->DeleteLocalRef(battery_intent);
-  }
-  env->DeleteLocalRef(filter);
-  env->DeleteLocalRef(battery_action);
-  env->DeleteLocalRef(intent_filter_class);
-
-  // Thermal status: PowerManager.getCurrentThermalStatus(), API 29+ only.
-  jclass build_version_class = env->FindClass("android/os/Build$VERSION");
-  jfieldID sdk_int_field =
-      env->GetStaticFieldID(build_version_class, "SDK_INT", "I");
-  const jint sdk_int = env->GetStaticIntField(build_version_class, sdk_int_field);
-  env->DeleteLocalRef(build_version_class);
-
-  if (sdk_int >= 29) {
-    jfieldID power_service_field = env->GetStaticFieldID(
-        context_class, "POWER_SERVICE", "Ljava/lang/String;");
-    jstring power_service = static_cast<jstring>(
-        env->GetStaticObjectField(context_class, power_service_field));
-
-    jmethodID get_system_service = env->GetMethodID(
-        activity_class, "getSystemService",
-        "(Ljava/lang/String;)Ljava/lang/Object;");
-    jobject power_manager =
-        env->CallObjectMethod(activity, get_system_service, power_service);
-    if (env->ExceptionCheck()) {
-      env->ExceptionClear();
-      power_manager = nullptr;
-    }
-
-    if (power_manager != nullptr) {
-      jclass power_manager_class = env->GetObjectClass(power_manager);
-      jmethodID get_thermal_status = env->GetMethodID(
-          power_manager_class, "getCurrentThermalStatus", "()I");
-      if (get_thermal_status != nullptr) {
-        out.thermal_status =
-            env->CallIntMethod(power_manager, get_thermal_status);
-      } else {
-        env->ExceptionClear();
-      }
-      env->DeleteLocalRef(power_manager_class);
-      env->DeleteLocalRef(power_manager);
-    }
-    env->DeleteLocalRef(power_service);
-  }
-
-  env->DeleteLocalRef(context_class);
-  env->DeleteLocalRef(activity_class);
-  return out;
-}
 
 std::string FilesRoot(android_app* app) {
   return app->activity->externalDataPath != nullptr
@@ -649,7 +250,7 @@ void StopCapture(AppState* state) {
   // and left the "background recording active" notification stuck with
   // nothing left running to clear it.
   if (state->recorder.is_recording()) {
-    sensor_logger::LocationData end_loc = GetLocationData(state->app);
+    LocationData end_loc = GetLocationData(state->app);
     state->recorder.Stop(end_loc);
     StopRecordingService(state->app);
   } else {
@@ -701,7 +302,7 @@ void RevertExtrinsicModeIfActive(AppState* state) {
 
 void ToggleRecording(AppState* state) {
   if (state->recorder.is_recording()) {
-    sensor_logger::LocationData end_loc = GetLocationData(state->app);
+    LocationData end_loc = GetLocationData(state->app);
     state->recorder.Stop(end_loc);
     StopRecordingService(state->app);
     state->camera.UnlockExposureAndFocus();
@@ -739,7 +340,7 @@ void ToggleRecording(AppState* state) {
       state->exposure_pinned ? state->pinned_result : state->last_result,
       state->config.max_exposure_ns, state->config.mains_hz);
 
-  sensor_logger::LocationData start_loc = GetLocationData(state->app);
+  LocationData start_loc = GetLocationData(state->app);
   if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
                             state->camera.info(), state->config, start_loc)) {
     StartRecordingService(state->app);
@@ -1262,7 +863,7 @@ extern "C" void android_main(android_app* app) {
       // forever: no new frames, no error, capturing still true, with no way
       // back short of leaving the app.
       if (state.recorder.is_recording()) {
-        sensor_logger::LocationData end_loc = GetLocationData(app);
+        LocationData end_loc = GetLocationData(app);
         state.recorder.Stop(end_loc);
         StopRecordingService(app);
         state.stop_reason = "STOPPED - CAMERA DISCONNECTED";
@@ -1387,7 +988,7 @@ extern "C" void android_main(android_app* app) {
 
       if (state.recorder.is_recording() &&
           state.free_bytes < kMinimumFreeBytes) {
-        sensor_logger::LocationData end_loc = GetLocationData(app);
+        LocationData end_loc = GetLocationData(app);
         state.recorder.Stop(end_loc);
         StopRecordingService(app);
         state.camera.UnlockExposureAndFocus();

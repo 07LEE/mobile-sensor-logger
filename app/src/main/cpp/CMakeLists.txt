@@ -31,6 +31,10 @@ add_library(sensor_logger SHARED
     storage/session_recorder.cc
     sensors/imu_source.cc
     input/input.cc
+    platform/device_status.cc
+    platform/location.cc
+    platform/permissions.cc
+    platform/recording_service.cc
 )
 
 target_include_directories(sensor_logger PRIVATE
@@ -41,6 +45,7 @@ target_include_directories(sensor_logger PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/storage
     ${CMAKE_CURRENT_SOURCE_DIR}/pipeline
     ${CMAKE_CURRENT_SOURCE_DIR}/input
+    ${CMAKE_CURRENT_SOURCE_DIR}/platform
 )
 
 # Android 15 and newer expect native libraries aligned to a 16 KB page, and warn
