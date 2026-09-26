@@ -7,7 +7,7 @@ Android app that records camera images and inertial data for 3D reconstruction o
 - Records accelerometer and gyroscope on the same clock as the images
 - Computes no pose on the device
 
-C++ throughout, against the Camera2 NDK, with no application Java or Kotlin. `GameActivity` hosts it.
+C++ throughout, against the Camera2 NDK. `GameActivity` hosts it, and the only application Java is a small foreground service that keeps recording alive in the background.
 
 ## Building and running
 
@@ -79,3 +79,7 @@ Hardware profiles and camera parameters for tested devices (Galaxy S25 Ultra, Ga
 | [docs/devices.md](docs/devices.md) | hardware profiles and parameters for tested devices |
 | [docs/calibration-guide.md](docs/calibration-guide.md) | what to do when a device doesn't publish camera calibration |
 | [docs/adr/](docs/adr/) | why it is built this way |
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).

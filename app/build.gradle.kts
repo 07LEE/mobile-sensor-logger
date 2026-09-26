@@ -13,8 +13,8 @@ android {
         // deprecated path it replaces is not worth carrying.
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = property("VERSION_CODE").toString().toInt()
+        versionName = property("VERSION_NAME").toString()
 
         externalNativeBuild {
             cmake {
