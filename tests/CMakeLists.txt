@@ -10,6 +10,7 @@ enable_testing()
 add_executable(sampling_tests
     sampling_tests.cc
     ../app/src/main/cpp/pipeline/frame_motion.cc
+    ../app/src/main/cpp/pipeline/keyframe_selector.cc
     ../app/src/main/cpp/pipeline/sharpness.cc
 )
 

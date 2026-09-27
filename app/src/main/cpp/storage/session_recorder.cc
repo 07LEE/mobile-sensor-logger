@@ -162,6 +162,7 @@ bool SessionRecorder::Start(const std::string& root,
   lifecycle_ << "timestamp_ns,event\n";
 
   motion_.Reset();
+  selector_.Reset();
   if (!motion_.SetThresholds(config.min_shift, config.min_residual)) {
     __android_log_print(ANDROID_LOG_WARN, kTag,
                         "rejected shift/residual thresholds %.3f/%.3f; kept "
@@ -170,6 +171,8 @@ bool SessionRecorder::Start(const std::string& root,
                         motion_.min_shift(), motion_.min_residual());
   }
   pending_.Clear();
+  window_candidate_.Clear();
+  stationary_candidate_.Clear();
   writer_.Start([this](PendingFrame& frame) { WriteFrame(frame); });
 
   start_timestamp_ns_ = start_timestamp_ns;
@@ -208,9 +211,10 @@ void SessionRecorder::Record(const FrameData& frame) {
       LumaSharpness(luma.data, frame.image.width, frame.image.height,
                     luma.row_stride, kSharpnessStep);
 
-  // Before the decision, so the row describes the frame as it was offered
-  // rather than as it was treated.
-  const bool moved = motion_.Accept(frame.image);
+  // Before anything below reacts to it, so the row describes the frame as it
+  // was measured rather than as it was treated.
+  const bool had_reference = motion_.has_reference();
+  motion_.Measure(frame.image);
   WriteCandidate(frame.timestamp_ns, sharpness);
 
   // Keeping everything skips the comparison entirely: each frame goes straight
@@ -218,22 +222,65 @@ void SessionRecorder::Record(const FrameData& frame) {
   // selection rule can be judged against a take it did not get to make.
   if (retention_ == Retention::kAll) {
     pending_.Set(frame, sharpness);
-    FlushPending();
+    FlushPendingFrame(pending_);
+    motion_.Commit(motion_.current_grid(), motion_.current_grid_height());
     return;
   }
 
-  // Enough movement closes the current stretch: whatever the sharpest frame in
-  // it turned out to be is written now, and this frame opens the next.
-  if (moved) {
-    FlushPending();
-    pending_.Set(frame, sharpness);
+  if (!had_reference) {
+    // The first frame of the session: nothing to measure it against yet, so it
+    // becomes the baseline both candidates start from — not a keyframe in its
+    // own right until a later frame confirms or supersedes it.
+    selector_.Confirmed(frame.timestamp_ns);
+    SetCandidate(&window_candidate_, frame, sharpness);
+    SetCandidate(&stationary_candidate_, frame, sharpness);
     return;
   }
 
-  // Still within the stretch — this frame only matters if it beats the leader.
-  if (!pending_.valid() || sharpness > pending_.sharpness()) {
-    pending_.Set(frame, sharpness);
+  selector_.Observe(frame.timestamp_ns, motion_.last_shift(), motion_.last_residual(),
+                    motion_.min_shift(), motion_.min_residual());
+
+  // The window narrows which candidates can win the spacing-driven confirm
+  // below to ones close to where target was reached — see ADR 14 for why the
+  // sharpest frame of the whole stretch is not good enough on its own.
+  if (selector_.InWindow() &&
+      (!window_candidate_.valid() ||
+       sharpness > window_candidate_.frame.sharpness())) {
+    SetCandidate(&window_candidate_, frame, sharpness);
   }
+  // Tracked unconditionally, for the stationary ceiling: unlike the window
+  // candidate, this one is never empty once any frame has arrived.
+  if (!stationary_candidate_.valid() ||
+      sharpness > stationary_candidate_.frame.sharpness()) {
+    SetCandidate(&stationary_candidate_, frame, sharpness);
+  }
+
+  const KeyframeSelector::ConfirmReason reason = selector_.ShouldConfirm();
+  if (reason == KeyframeSelector::ConfirmReason::kNone) return;
+
+  // window_candidate_ can still be empty on a kWindow confirm if the very
+  // first frame observed after the last keyframe already crossed target —
+  // ShouldConfirm() went true before InWindow() ever had a frame to accept.
+  Candidate* winner = (reason == KeyframeSelector::ConfirmReason::kWindow &&
+                      window_candidate_.valid())
+                          ? &window_candidate_
+                          : &stationary_candidate_;
+  ConfirmKeyframe(winner, frame.timestamp_ns);
+}
+
+void SessionRecorder::SetCandidate(Candidate* candidate, const FrameData& frame,
+                                   float sharpness) {
+  candidate->frame.Set(frame, sharpness);
+  candidate->grid = motion_.current_grid();
+  candidate->grid_height = motion_.current_grid_height();
+}
+
+void SessionRecorder::ConfirmKeyframe(Candidate* winner, int64_t timestamp_ns) {
+  motion_.Commit(winner->grid, winner->grid_height);
+  FlushPendingFrame(winner->frame);
+  window_candidate_.Clear();
+  stationary_candidate_.Clear();
+  selector_.Confirmed(timestamp_ns);
 }
 
 void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
@@ -311,18 +358,18 @@ void SessionRecorder::WriteCandidate(int64_t timestamp_ns, float sharpness) {
   }
 }
 
-void SessionRecorder::FlushPending() {
-  if (!pending_.valid()) return;
+void SessionRecorder::FlushPendingFrame(PendingFrame& frame) {
+  if (!frame.valid()) return;
 
   // Dropped rather than written late, and counted by the writer. The queue only
   // fills when the disk is behind, and the frame that would clear the backlog
   // by waiting is the one whose viewpoint the capture is currently at.
-  writer_.Submit(std::move(pending_));
-  pending_.Clear();
+  writer_.Submit(std::move(frame));
+  frame.Clear();
 
   // Its buffer went with it; take a spent one so the next copy is not into
   // freshly mapped pages.
-  pending_.AdoptBuffer(writer_.TakeBuffer());
+  frame.AdoptBuffer(writer_.TakeBuffer());
 }
 
 void SessionRecorder::WriteFrame(PendingFrame& frame) {
@@ -372,9 +419,15 @@ bool SessionRecorder::WriteImage(const PendingFrame& frame,
 void SessionRecorder::Stop(const LocationData& end_location) {
   if (!recording_) return;
 
-  // The last stretch is never closed by movement, so its leader would otherwise
-  // be lost.
-  FlushPending();
+  // The last stretch is never closed by movement, so whatever led it would
+  // otherwise be lost entirely. Prefer the window candidate — closer to the
+  // intended spacing — and fall back to the stationary one, which is never
+  // empty once any frame arrived, if the window never opened.
+  FlushPendingFrame(pending_);
+  FlushPendingFrame(window_candidate_.valid() ? window_candidate_.frame
+                                              : stationary_candidate_.frame);
+  window_candidate_.Clear();
+  stationary_candidate_.Clear();
 
   // Before the streams close: the writer thread is what writes to them.
   writer_.Stop();

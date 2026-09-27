@@ -9,12 +9,14 @@
 #include <vector>
 
 #include "frame_motion.h"
+#include "keyframe_selector.h"
 #include "sharpness.h"
 
 namespace {
 
 using sensor_logger::CameraImageView;
 using sensor_logger::FrameMotion;
+using sensor_logger::KeyframeSelector;
 using sensor_logger::LumaSharpness;
 
 constexpr int32_t kWidth = 128;
@@ -160,45 +162,63 @@ void RequireNear(float actual, float expected, float tolerance,
   }
 }
 
-void TestUnchangedFrameIsRejected() {
+// --- FrameMotion: measurement only, see ADR 14 -----------------------------
+
+void TestFirstFrameEstablishesReference() {
   const TestImage image = TestImage::Pattern();
   FrameMotion motion;
-  Require(motion.Accept(image.View()), "first frame should establish a reference");
-  Require(!motion.Accept(image.View()), "unchanged frame should remain in the stretch");
-  RequireNear(motion.last_shift(), 0.0f, 1e-6f, "unchanged frame shift");
-  RequireNear(motion.last_residual(), 0.0f, 1e-6f, "unchanged frame residual");
-  Require(motion.rejected() == 1, "unchanged frame should increment rejected count");
+  Require(!motion.has_reference(), "a fresh FrameMotion should have no reference yet");
+  motion.Measure(image.View());
+  Require(motion.has_reference(), "the first Measure() call should establish a reference");
+  RequireNear(motion.last_shift(), 0.0f, 1e-6f, "the first frame has nothing to compare against");
+  RequireNear(motion.last_residual(), 0.0f, 1e-6f, "the first frame has nothing to compare against");
+}
+
+void TestResetClearsReference() {
+  const TestImage image = TestImage::Pattern();
+  FrameMotion motion;
+  motion.Measure(image.View());
+  Require(motion.has_reference(), "Measure() should have established a reference");
+  motion.Reset();
+  Require(!motion.has_reference(), "Reset() should clear the reference");
+}
+
+void TestUnchangedFrameMeasuresZeroMotion() {
+  const TestImage image = TestImage::Pattern();
+  FrameMotion motion;
+  motion.Measure(image.View());
+  motion.Measure(image.View());
+  RequireNear(motion.last_shift(), 0.0f, 1e-6f, "an unchanged frame should measure zero shift");
+  RequireNear(motion.last_residual(), 0.0f, 1e-6f, "an unchanged frame should measure zero residual");
 }
 
 void TestHorizontalSearchLimit() {
   const TestImage reference = TestImage::Pattern();
   const TestImage shifted = Translate(reference, 20, 0);
   FrameMotion motion;
-  Require(motion.Accept(reference.View()), "first frame should establish a reference");
-  Require(motion.Accept(shifted.View()),
-          "a shift at the search limit should still close the default stretch");
+  motion.Measure(reference.View());
+  motion.Measure(shifted.View());
   RequireNear(motion.last_shift(), FrameMotion::kMaxShift, 1e-6f,
               "horizontal search should saturate at the maximum measurable shift");
   RequireNear(motion.last_residual(), 0.0f, 1e-6f,
               "translated overlap should align exactly at the search limit");
 }
 
-void TestDefaultShiftClosesStretch() {
+void TestPartialHorizontalShiftIsMeasured() {
   const TestImage reference = TestImage::Pattern();
   const TestImage shifted = Translate(reference, 16, 0);
   FrameMotion motion;
-  Require(motion.Accept(reference.View()), "first frame should establish a reference");
-  Require(motion.Accept(shifted.View()), "eight grid columns should cross default shift threshold");
-  RequireNear(motion.last_shift(), 8.0f / 64.0f, 1e-6f, "default shift measurement");
+  motion.Measure(reference.View());
+  motion.Measure(shifted.View());
+  RequireNear(motion.last_shift(), 8.0f / 64.0f, 1e-6f, "eight grid columns of shift");
 }
 
 void TestDiagonalMotionIsMeasured() {
   const TestImage reference = TestImage::Pattern();
   const TestImage shifted = Translate(reference, 12, 16);
   FrameMotion motion;
-  Require(motion.Accept(reference.View()), "first frame should establish a reference");
-  Require(motion.Accept(shifted.View()),
-          "diagonal motion at the search limit should close the default stretch");
+  motion.Measure(reference.View());
+  motion.Measure(shifted.View());
   RequireNear(motion.last_shift(), 10.0f / 64.0f, 1e-6f,
               "six-by-eight grid translation should have ten-column magnitude");
 }
@@ -242,24 +262,45 @@ void TestSetThresholdsRejectsUnreachableValues() {
 void TestShiftPresetsAreReachable() {
   const TestImage reference = TestImage::Pattern();
   const TestImage shifted = Translate(reference, 20, 0);
+  FrameMotion motion;
+  motion.Measure(reference.View());
+  motion.Measure(shifted.View());
   for (float preset : FrameMotion::kShiftPresets) {
     Require(FrameMotion::IsValidShiftThreshold(preset),
             "a PRO panel shift preset must fall within the measurable range");
-    FrameMotion motion;
-    Require(motion.SetThresholds(preset, FrameMotion::kMaxResidual - 0.001f),
-            "a valid preset should be accepted by SetThresholds");
-    Require(motion.Accept(reference.View()), "first frame should establish a reference");
-    Require(motion.Accept(shifted.View()),
-            "a search-limit single-axis shift should close the stretch at every preset");
+    Require(motion.last_shift() > preset,
+            "a search-limit single-axis shift should cross every preset");
   }
+}
+
+void TestCommitRebasesTheReference() {
+  const TestImage a = TestImage::Pattern();
+  const TestImage b = Translate(a, 16, 0);
+  const TestImage c = Translate(a, 32, 0);
+
+  FrameMotion motion;
+  motion.Measure(a.View());
+
+  motion.Measure(b.View());
+  const std::vector<uint8_t> grid_b = motion.current_grid();
+  const int32_t grid_height_b = motion.current_grid_height();
+  RequireNear(motion.last_shift(), 8.0f / 64.0f, 1e-6f, "b is eight grid columns from a");
+
+  motion.Commit(grid_b, grid_height_b);
+  RequireNear(motion.last_shift(), 0.0f, 1e-6f, "Commit() should reset the measurement to zero");
+
+  motion.Measure(c.View());
+  RequireNear(motion.last_shift(), 8.0f / 64.0f, 1e-6f,
+              "c is eight grid columns from b, not sixteen from a — Commit() must have rebased "
+              "the reference to b rather than leaving it at a");
 }
 
 void TestBrightnessChangeTriggersResidual() {
   const TestImage reference = TestImage::Pattern();
   const TestImage brighter = AddBrightness(reference, 24);
   FrameMotion motion;
-  Require(motion.Accept(reference.View()), "first frame should establish a reference");
-  Require(motion.Accept(brighter.View()), "brightness change should cross current residual threshold");
+  motion.Measure(reference.View());
+  motion.Measure(brighter.View());
   Require(motion.last_residual() >= FrameMotion::kDefaultMinResidual,
           "brightness change residual should reach default threshold");
 }
@@ -268,8 +309,8 @@ void TestRotationTriggersResidual() {
   const TestImage reference = TestImage::Pattern();
   const TestImage rotated = Rotate(reference, 5.0f);
   FrameMotion motion;
-  Require(motion.Accept(reference.View()), "first frame should establish a reference");
-  Require(motion.Accept(rotated.View()), "rotation should close the current stretch");
+  motion.Measure(reference.View());
+  motion.Measure(rotated.View());
   Require(motion.last_residual() >= FrameMotion::kDefaultMinResidual,
           "rotation should be visible in residual");
 }
@@ -278,8 +319,8 @@ void TestScaleChangeTriggersResidual() {
   const TestImage reference = TestImage::Pattern();
   const TestImage scaled = Scale(reference, 1.08f);
   FrameMotion motion;
-  Require(motion.Accept(reference.View()), "first frame should establish a reference");
-  Require(motion.Accept(scaled.View()), "scale change should close the current stretch");
+  motion.Measure(reference.View());
+  motion.Measure(scaled.View());
   Require(motion.last_residual() >= FrameMotion::kDefaultMinResidual,
           "scale change should be visible in residual");
 }
@@ -296,22 +337,145 @@ void TestSharpImageOutranksBlurredImage() {
   Require(blurred_score > 0.0f, "blurred textured image should retain a positive score");
 }
 
+// --- KeyframeSelector: spacing decision only, see ADR 14 --------------------
+
+constexpr float kSelectorTargetShift = 0.12f;
+constexpr float kSelectorTargetResidual = 0.06f;
+
+void TestSelectorIdleBelowApproachRatio() {
+  KeyframeSelector selector;
+  selector.Observe(0, 0.05f, 0.02f, kSelectorTargetShift, kSelectorTargetResidual);
+  Require(!selector.InWindow(), "progress below the approach ratio should not open the window");
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "nothing should confirm while far from target");
+}
+
+void TestSelectorWindowOpensNearTarget() {
+  KeyframeSelector selector;
+  // 90% of target shift: above kApproachRatio (0.85) but short of target itself.
+  selector.Observe(0, kSelectorTargetShift * 0.9f, 0.0f, kSelectorTargetShift,
+                   kSelectorTargetResidual);
+  Require(selector.InWindow(), "progress above the approach ratio should open the window");
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "the window opening on its own should not confirm anything yet");
+}
+
+void TestSelectorConfirmsWindowAfterPostCrossingDelay() {
+  KeyframeSelector selector;
+  const int64_t crossed_at = 1000;
+  selector.Observe(crossed_at, kSelectorTargetShift, 0.0f, kSelectorTargetShift,
+                   kSelectorTargetResidual);
+  Require(selector.InWindow(), "the crossing frame itself is still inside its own window");
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "crossing should not confirm immediately — see ADR 14");
+
+  const int64_t at_edge = crossed_at + KeyframeSelector::kPostCrossingWindowNs;
+  selector.Observe(at_edge, kSelectorTargetShift, 0.0f, kSelectorTargetShift,
+                   kSelectorTargetResidual);
+  Require(selector.InWindow(), "exactly at the window's edge should still be inside it");
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "the edge itself should not yet confirm");
+
+  const int64_t past_edge = at_edge + 1;
+  selector.Observe(past_edge, kSelectorTargetShift, 0.0f, kSelectorTargetShift,
+                   kSelectorTargetResidual);
+  Require(!selector.InWindow(), "past the window's edge should no longer be inside it");
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kWindow,
+          "the first frame past the window should confirm via the window path");
+}
+
+void TestSelectorResidualAloneCanCrossAndConfirm() {
+  KeyframeSelector selector;
+  selector.Observe(0, 0.0f, kSelectorTargetResidual, kSelectorTargetShift,
+                   kSelectorTargetResidual);
+  Require(selector.InWindow(), "residual alone reaching target should open the window");
+
+  const int64_t past_edge = KeyframeSelector::kPostCrossingWindowNs + 1;
+  selector.Observe(past_edge, 0.0f, kSelectorTargetResidual, kSelectorTargetShift,
+                   kSelectorTargetResidual);
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kWindow,
+          "residual alone should be able to drive a window confirmation");
+}
+
+void TestSelectorStationaryTimeoutFires() {
+  KeyframeSelector selector;
+  selector.Observe(0, 0.0f, 0.0f, kSelectorTargetShift, kSelectorTargetResidual);
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "no movement at all should not confirm before the stationary ceiling");
+
+  const int64_t before_ceiling = KeyframeSelector::kMaxStationaryIntervalNs - 1;
+  selector.Observe(before_ceiling, 0.0f, 0.0f, kSelectorTargetShift, kSelectorTargetResidual);
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "just under the stationary ceiling should still wait");
+
+  const int64_t at_ceiling = KeyframeSelector::kMaxStationaryIntervalNs;
+  selector.Observe(at_ceiling, 0.0f, 0.0f, kSelectorTargetShift, kSelectorTargetResidual);
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kStationary,
+          "the stationary ceiling should confirm on elapsed time alone");
+}
+
+void TestSelectorConfirmedRestartsTimers() {
+  KeyframeSelector selector;
+  selector.Observe(0, kSelectorTargetShift, 0.0f, kSelectorTargetShift, kSelectorTargetResidual);
+  selector.Confirmed(5000);
+
+  Require(!selector.InWindow(), "confirming should close the window immediately");
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "confirming should clear the pending reason");
+
+  const int64_t before_next_ceiling = 5000 + KeyframeSelector::kMaxStationaryIntervalNs - 1;
+  selector.Observe(before_next_ceiling, 0.0f, 0.0f, kSelectorTargetShift,
+                   kSelectorTargetResidual);
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "the stationary ceiling should count from the confirmed timestamp, not from zero");
+
+  const int64_t at_next_ceiling = 5000 + KeyframeSelector::kMaxStationaryIntervalNs;
+  selector.Observe(at_next_ceiling, 0.0f, 0.0f, kSelectorTargetShift, kSelectorTargetResidual);
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kStationary,
+          "the stationary ceiling should still fire relative to the new confirmation time");
+}
+
+void TestSelectorResetClearsState() {
+  KeyframeSelector selector;
+  selector.Observe(0, kSelectorTargetShift, 0.0f, kSelectorTargetShift, kSelectorTargetResidual);
+  selector.Reset();
+  Require(!selector.InWindow(), "Reset() should close any open window");
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "Reset() should clear any pending confirmation");
+
+  // The stationary ceiling should count from whenever Observe() next runs, not
+  // from the timestamps seen before Reset().
+  selector.Observe(1, 0.0f, 0.0f, kSelectorTargetShift, kSelectorTargetResidual);
+  Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
+          "Reset() should restart the stationary ceiling from the next observation");
+}
+
 }  // namespace
 
 int main() {
   const std::vector<std::pair<std::string, std::function<void()>>> tests = {
-      {"unchanged frame", TestUnchangedFrameIsRejected},
+      {"first frame establishes reference", TestFirstFrameEstablishesReference},
+      {"reset clears reference", TestResetClearsReference},
+      {"unchanged frame", TestUnchangedFrameMeasuresZeroMotion},
       {"horizontal search limit", TestHorizontalSearchLimit},
-      {"default shift", TestDefaultShiftClosesStretch},
+      {"partial horizontal shift", TestPartialHorizontalShiftIsMeasured},
       {"diagonal motion", TestDiagonalMotionIsMeasured},
       {"shift threshold boundaries", TestShiftThresholdBoundaries},
       {"residual threshold boundaries", TestResidualThresholdBoundaries},
       {"rejects unreachable thresholds", TestSetThresholdsRejectsUnreachableValues},
       {"shift presets reachable", TestShiftPresetsAreReachable},
+      {"commit rebases reference", TestCommitRebasesTheReference},
       {"brightness residual", TestBrightnessChangeTriggersResidual},
       {"rotation residual", TestRotationTriggersResidual},
       {"scale residual", TestScaleChangeTriggersResidual},
       {"sharpness ranking", TestSharpImageOutranksBlurredImage},
+      {"selector idle below approach ratio", TestSelectorIdleBelowApproachRatio},
+      {"selector window opens near target", TestSelectorWindowOpensNearTarget},
+      {"selector confirms window after delay", TestSelectorConfirmsWindowAfterPostCrossingDelay},
+      {"selector residual alone confirms", TestSelectorResidualAloneCanCrossAndConfirm},
+      {"selector stationary timeout fires", TestSelectorStationaryTimeoutFires},
+      {"selector confirmed restarts timers", TestSelectorConfirmedRestartsTimers},
+      {"selector reset clears state", TestSelectorResetClearsState},
   };
 
   for (const auto& [name, test] : tests) {

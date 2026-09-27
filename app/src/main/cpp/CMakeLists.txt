@@ -20,6 +20,7 @@ add_library(sensor_logger SHARED
     camera/camera_source.cc
     camera/capture_config.cc
     pipeline/frame_motion.cc
+    pipeline/keyframe_selector.cc
     pipeline/pending_frame.cc
     pipeline/sharpness.cc
     ui/gl_quad.cc

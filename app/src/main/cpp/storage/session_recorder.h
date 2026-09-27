@@ -13,6 +13,7 @@
 #include "frame_motion.h"
 #include "frame_writer.h"
 #include "imu_source.h"
+#include "keyframe_selector.h"
 #include "location.h"
 #include "pending_frame.h"
 #include "session_item.h"
@@ -142,8 +143,28 @@ class SessionRecorder {
   float last_residual() const { return motion_.last_residual(); }
 
  private:
+  // A candidate frame competing to be the next keyframe: the sharpest seen so
+  // far, plus the FrameMotion grid it was measured against at the time it took
+  // the lead. The grid is a few KB, cheap to carry alongside a candidate that
+  // might not win — unlike its raw image, which PendingFrame already holds at
+  // the cost of one buffer. See ADR 14 for why two of these exist below.
+  struct Candidate {
+    PendingFrame frame;
+    std::vector<uint8_t> grid;
+    int32_t grid_height = 0;
+
+    bool valid() const { return frame.valid(); }
+    void Clear() {
+      frame.Clear();
+      grid.clear();
+      grid_height = 0;
+    }
+  };
+
   void WriteCandidate(int64_t timestamp_ns, float sharpness);
-  void FlushPending();
+  void FlushPendingFrame(PendingFrame& frame);
+  void SetCandidate(Candidate* candidate, const FrameData& frame, float sharpness);
+  void ConfirmKeyframe(Candidate* winner, int64_t timestamp_ns);
 
   // Both run on the writer thread. Nothing else touches frames_,
   // written_frames_ or frames_without_image_ while it is running, which is what
@@ -164,7 +185,19 @@ class SessionRecorder {
   std::ofstream lifecycle_;
 
   FrameMotion motion_;
+  KeyframeSelector selector_;
+
+  // Only used by Retention::kAll, where every frame is written immediately
+  // and there is no competition between candidates to track.
   PendingFrame pending_;
+
+  // The kSharpest path's two competing candidates — see the Candidate comment
+  // above and ADR 14. window_candidate_ can be empty even after the window has
+  // opened, if the very first frame past the last keyframe already crosses
+  // target; stationary_candidate_ never is, once any frame has arrived.
+  Candidate window_candidate_;
+  Candidate stationary_candidate_;
+
   FrameWriter writer_;
 
   int64_t start_timestamp_ns_ = 0;

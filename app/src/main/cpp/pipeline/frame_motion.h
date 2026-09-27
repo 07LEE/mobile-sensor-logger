@@ -8,13 +8,11 @@
 
 namespace sensor_logger {
 
-// Decides where one stretch of movement ends and the next begins, by measuring
-// how much the picture changed.
-//
-// This does not pick the frame to keep — SessionRecorder writes the sharpest
-// frame of each stretch, not the one that closed it, because the frame that
-// happens to cross the threshold is as likely to be blurred as any other. What
-// this bounds is how much the written viewpoints overlap.
+// Measures how much the picture has changed from a reference frame. It does
+// not decide anything: not whether that is enough to end a stretch of
+// movement, and not what the reference should be next. KeyframeSelector owns
+// both of those, from the shift and residual this reports each frame — this
+// split is so the spacing decision can run, and be tested, without a camera.
 //
 // Measured in the image rather than derived from a pose. Overlap is what a
 // reconstruction actually needs, and a pose only implies it once the distance
@@ -57,9 +55,26 @@ class FrameMotion {
     SetThresholds(min_shift, min_residual);
   }
 
-  // True when the picture has changed enough to start a new stretch, which also
-  // makes this frame the reference for the next one.
-  bool Accept(const CameraImageView& image);
+  // Measures image against the reference: last_shift()/last_residual() read
+  // the result afterward. Never changes the reference — see Commit() — except
+  // when there isn't one yet, where the only sensible comparison is to itself,
+  // so this frame becomes the reference and both measurements read zero.
+  void Measure(const CameraImageView& image);
+
+  // False only before the first Measure() call in a session (or since Reset()).
+  bool has_reference() const { return !reference_.empty(); }
+
+  // Replaces the reference with a previously-measured frame's grid, once a
+  // selector has picked which candidate becomes the next keyframe — not
+  // necessarily the frame Measure() most recently saw. Grids are small enough
+  // (kGridWidth * grid_height bytes) that a caller can hold on to several
+  // candidates' worth without the cost a raw image would carry.
+  void Commit(const std::vector<uint8_t>& grid, int32_t grid_height);
+
+  // The grid Measure() computed for the frame it most recently saw, and its
+  // height, for a caller to snapshot into a candidate it might later Commit().
+  const std::vector<uint8_t>& current_grid() const { return current_; }
+  int32_t current_grid_height() const { return grid_height_; }
 
   // Invalid values leave the corresponding threshold unchanged. Callers that
   // read external settings can therefore report the rejection without turning
@@ -74,13 +89,11 @@ class FrameMotion {
 
   void Reset();
 
-  // How the last frame compared with the reference. Recorded per frame and
-  // shown on screen, since between them they are the only signal the device has
-  // that a capture is covering new ground.
+  // How the last-measured frame compared with the reference. Recorded per
+  // frame and shown on screen, since between them they are the only signal the
+  // device has that a capture is covering new ground.
   float last_shift() const { return last_shift_; }
   float last_residual() const { return last_residual_; }
-
-  int64_t rejected() const { return rejected_; }
 
  private:
   void Downsample(const CameraImageView& image, std::vector<uint8_t>* out);
@@ -93,7 +106,6 @@ class FrameMotion {
   float min_residual_ = kDefaultMinResidual;
   float last_shift_ = 0.0f;
   float last_residual_ = 0.0f;
-  int64_t rejected_ = 0;
 };
 
 }  // namespace sensor_logger

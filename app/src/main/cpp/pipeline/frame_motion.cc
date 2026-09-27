@@ -27,16 +27,18 @@ void FrameMotion::Downsample(const CameraImageView& image,
   }
 }
 
-bool FrameMotion::Accept(const CameraImageView& image) {
-  if (!image.valid || image.planes[0].data == nullptr) return false;
+void FrameMotion::Measure(const CameraImageView& image) {
+  if (!image.valid || image.planes[0].data == nullptr) return;
 
   Downsample(image, &current_);
 
+  // Nothing to compare against yet: the only sensible reference for the first
+  // frame of a session (or after Reset()) is itself.
   if (reference_.size() != current_.size()) {
     reference_ = current_;
     last_shift_ = 0.0f;
     last_residual_ = 0.0f;
-    return true;
+    return;
   }
 
   // Best whole-pixel offset by sum of absolute differences over the part that
@@ -76,21 +78,19 @@ bool FrameMotion::Accept(const CameraImageView& image) {
   last_shift_ = std::sqrt(static_cast<float>(best_dx * best_dx + best_dy * best_dy)) /
                 static_cast<float>(kGridWidth);
   last_residual_ = best_error / 255.0f;
+}
 
-  if (last_shift_ < min_shift_ && last_residual_ < min_residual_) {
-    ++rejected_;
-    return false;
-  }
-
-  reference_ = current_;
-  return true;
+void FrameMotion::Commit(const std::vector<uint8_t>& grid, int32_t grid_height) {
+  reference_ = grid;
+  grid_height_ = grid_height;
+  last_shift_ = 0.0f;
+  last_residual_ = 0.0f;
 }
 
 void FrameMotion::Reset() {
   reference_.clear();
   last_shift_ = 0.0f;
   last_residual_ = 0.0f;
-  rejected_ = 0;
 }
 
 bool FrameMotion::IsValidShiftThreshold(float value) {

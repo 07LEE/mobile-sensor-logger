@@ -33,6 +33,7 @@ using sensor_logger::CaptureResult;
 using sensor_logger::CaptureConfig;
 using sensor_logger::Retention;
 using sensor_logger::FrameData;
+using sensor_logger::FrameMotion;
 using sensor_logger::ImuSample;
 using sensor_logger::Action;
 using sensor_logger::ImuSource;
