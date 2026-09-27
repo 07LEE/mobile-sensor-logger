@@ -239,6 +239,21 @@ void TestSetThresholdsRejectsUnreachableValues() {
               "an accepted shift threshold should take effect");
 }
 
+void TestShiftPresetsAreReachable() {
+  const TestImage reference = TestImage::Pattern();
+  const TestImage shifted = Translate(reference, 20, 0);
+  for (float preset : FrameMotion::kShiftPresets) {
+    Require(FrameMotion::IsValidShiftThreshold(preset),
+            "a PRO panel shift preset must fall within the measurable range");
+    FrameMotion motion;
+    Require(motion.SetThresholds(preset, FrameMotion::kMaxResidual - 0.001f),
+            "a valid preset should be accepted by SetThresholds");
+    Require(motion.Accept(reference.View()), "first frame should establish a reference");
+    Require(motion.Accept(shifted.View()),
+            "a search-limit single-axis shift should close the stretch at every preset");
+  }
+}
+
 void TestBrightnessChangeTriggersResidual() {
   const TestImage reference = TestImage::Pattern();
   const TestImage brighter = AddBrightness(reference, 24);
@@ -292,6 +307,7 @@ int main() {
       {"shift threshold boundaries", TestShiftThresholdBoundaries},
       {"residual threshold boundaries", TestResidualThresholdBoundaries},
       {"rejects unreachable thresholds", TestSetThresholdsRejectsUnreachableValues},
+      {"shift presets reachable", TestShiftPresetsAreReachable},
       {"brightness residual", TestBrightnessChangeTriggersResidual},
       {"rotation residual", TestRotationTriggersResidual},
       {"scale residual", TestScaleChangeTriggersResidual},

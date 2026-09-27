@@ -42,6 +42,10 @@ class FrameMotion {
   // Fraction of the frame width the picture may slide before the stretch ends.
   static constexpr float kDefaultMinShift = 0.12f;
 
+  // Presets the PRO panel's shift control steps through. Kept beside kMaxShift
+  // so a new preset cannot be added above what the search can reach.
+  static constexpr float kShiftPresets[] = {0.06f, 0.09f, kDefaultMinShift};
+
   // How much of the picture may fail to line up at the best offset, as a
   // fraction of full range, before the stretch ends regardless of the offset.
   static constexpr float kDefaultMinResidual = 0.06f;

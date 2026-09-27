@@ -15,6 +15,7 @@
 #include "camera_source.h"
 #include "capture_config.h"
 #include "device_status.h"
+#include "frame_motion.h"
 #include "imu_source.h"
 #include "input.h"
 #include "location.h"
@@ -491,9 +492,7 @@ void CycleShift(AppState* state) {
     return;
   }
 
-  // FrameMotion::kMaxShift (10/64 grid cells, ~0.156) bounds this; a preset at
-  // or above it could never be reached by horizontal or vertical motion alone.
-  constexpr float kSteps[] = {0.06f, 0.09f, 0.12f};
+  constexpr auto& kSteps = FrameMotion::kShiftPresets;
   constexpr size_t kStepCount = sizeof(kSteps) / sizeof(kSteps[0]);
 
   size_t index = 2;  // 0.12, the default, if nothing close enough matches
@@ -504,6 +503,7 @@ void CycleShift(AppState* state) {
     }
   }
   state->config.min_shift = kSteps[(index + 1) % kStepCount];
+  state->config.shift_rejected = false;
   state->config.Save(FilesRoot(state->app));
 }
 
@@ -526,6 +526,7 @@ void CycleResidual(AppState* state) {
     }
   }
   state->config.min_residual = kSteps[(index + 1) % kStepCount];
+  state->config.residual_rejected = false;
   state->config.Save(FilesRoot(state->app));
 }
 
@@ -587,6 +588,8 @@ void ResetProSettings(AppState* state) {
   state->config.mains_hz = 60;
   state->config.min_shift = 0.12f;
   state->config.min_residual = 0.06f;
+  state->config.shift_rejected = false;
+  state->config.residual_rejected = false;
   state->config.Save(FilesRoot(state->app));
 
   if (fps_changed) {
@@ -702,6 +705,16 @@ std::vector<std::string> StatusLines(const AppState& state) {
                 recorder.last_residual() * 100.0f,
                 state.config.min_residual * 100.0f);
   lines.emplace_back(buffer);
+
+  // A capture.conf value outside what FrameMotion can measure is kept at
+  // whatever it was before the file was read; this is the only place that
+  // says so without checking logcat.
+  if (state.config.shift_rejected) {
+    lines.emplace_back("SHIFT CONFIG REJECTED");
+  }
+  if (state.config.residual_rejected) {
+    lines.emplace_back("RESIDUAL CONFIG REJECTED");
+  }
 
   // Lens and retention are already on their own buttons below; the resolution
   // is not shown anywhere else.

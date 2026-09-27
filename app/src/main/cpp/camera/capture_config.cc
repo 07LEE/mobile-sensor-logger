@@ -79,7 +79,9 @@ bool CaptureConfig::Load(const std::string& directory) {
       // never be reached by horizontal or vertical motion alone.
       if (FrameMotion::IsValidShiftThreshold(parsed)) {
         min_shift = parsed;
+        shift_rejected = false;
       } else {
+        shift_rejected = true;
         __android_log_print(ANDROID_LOG_WARN, kTag,
                             "capture.conf: shift must be between 0 and %.5f, "
                             "got '%s'",
@@ -89,7 +91,9 @@ bool CaptureConfig::Load(const std::string& directory) {
       const float parsed = static_cast<float>(std::atof(value.c_str()));
       if (FrameMotion::IsValidResidualThreshold(parsed)) {
         min_residual = parsed;
+        residual_rejected = false;
       } else {
+        residual_rejected = true;
         __android_log_print(ANDROID_LOG_WARN, kTag,
                             "capture.conf: residual must be between 0 and "
                             "%.5f, got '%s'",
