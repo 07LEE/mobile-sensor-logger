@@ -42,7 +42,7 @@ Row strides are not the same as `width`. On a Galaxy S25 Ultra a 4080-wide frame
 Frames are written as the sensor reads them, which is not upright.
 `sensor_orientation` in session.json is how many degrees clockwise to rotate them — 90 on a Galaxy S25 Ultra.
 
-session.json opens with `device`, `android_release` and `android_sdk`. Every measurement in a session is a property of the camera and the sensors that took it, and so are the format assumptions, so a capture that does not say what took it cannot be checked against another.
+session.json opens with `app_version_name` and `app_version_code`, then `device`, `android_release` and `android_sdk`. Every measurement in a session is a property of the app build, the camera and the sensors that took it, and so are the format assumptions, so a capture that does not say what took it cannot be checked against another.
 
 It also carries `camera_id`, `focal_length_mm`, `aperture` and `sensor_size_mm`. Frames from different lenses cannot be solved as one camera — an ultra-wide and a periscope disagree about focal length by a factor of eight — so this is what says which one a session is.
 

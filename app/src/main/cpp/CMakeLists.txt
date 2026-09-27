@@ -63,3 +63,17 @@ target_link_libraries(sensor_logger
     EGL
     GLESv3
 )
+
+# Set by the Gradle build from gradle.properties (see app/build.gradle.kts) so
+# session.json can say which build produced a session. Defaulted here rather
+# than left undefined, so a CMake configure run outside Gradle still compiles.
+if(NOT DEFINED APP_VERSION_NAME)
+    set(APP_VERSION_NAME "unknown")
+endif()
+if(NOT DEFINED APP_VERSION_CODE)
+    set(APP_VERSION_CODE 0)
+endif()
+target_compile_definitions(sensor_logger PRIVATE
+    "APP_VERSION_NAME=\"${APP_VERSION_NAME}\""
+    "APP_VERSION_CODE=${APP_VERSION_CODE}"
+)

@@ -468,6 +468,8 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
   // its camera and its sensors, and the format assumptions along with them, so
   // a capture that does not say what took it cannot be checked against another.
   manifest << "{\n"
+           << "  \"app_version_name\": \"" APP_VERSION_NAME "\",\n"
+           << "  \"app_version_code\": " << APP_VERSION_CODE << ",\n"
            << "  \"device\": \""
            << Escaped(SystemProperty("ro.product.manufacturer")) << " "
            << Escaped(SystemProperty("ro.product.model")) << "\",\n"
