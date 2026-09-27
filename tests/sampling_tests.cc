@@ -337,6 +337,71 @@ void TestSharpImageOutranksBlurredImage() {
   Require(blurred_score > 0.0f, "blurred textured image should retain a positive score");
 }
 
+void TestSharpnessRankingStableAcrossStep() {
+  const TestImage sharp = TestImage::Pattern();
+  const TestImage blurred = BoxBlur(sharp, 3);
+  for (int32_t step : {1, 2, 4}) {
+    const float sharp_score = LumaSharpness(sharp.pixels().data(), sharp.width(),
+                                            sharp.height(), sharp.width(), step);
+    const float blurred_score = LumaSharpness(blurred.pixels().data(), blurred.width(),
+                                              blurred.height(), blurred.width(), step);
+    Require(sharp_score > blurred_score,
+            "the sharp/blurred ranking should hold at every sampling step now that "
+            "step no longer changes the Laplacian's neighbour distance");
+  }
+}
+
+void TestSharpnessRejectsInvalidInputs() {
+  const TestImage image = TestImage::Pattern();
+  RequireNear(LumaSharpness(nullptr, image.width(), image.height(), image.width(), 4),
+             0.0f, 1e-6f, "a null luma pointer should score zero");
+  RequireNear(LumaSharpness(image.pixels().data(), image.width(), image.height(),
+                            image.width(), 0),
+             0.0f, 1e-6f, "a non-positive step should score zero");
+  RequireNear(LumaSharpness(image.pixels().data(), image.width(), image.height(),
+                            image.width(), 4, 0),
+             0.0f, 1e-6f, "a non-positive radius should score zero");
+}
+
+void TestSharpnessMinimumViableImageSize() {
+  // radius=1 (the default) and step=1 need at least two interior samples for a
+  // variance — 4x4 is the smallest square that leaves any.
+  TestImage image(4, 4);
+  for (int32_t y = 0; y < 4; ++y) {
+    for (int32_t x = 0; x < 4; ++x) {
+      image.At(x, y) = static_cast<uint8_t>((x * 37 + y * 91) % 256);
+    }
+  }
+  const float score = LumaSharpness(image.pixels().data(), 4, 4, 4, 1);
+  Require(score > 0.0f, "a 4x4 image should be just large enough to score");
+
+  const TestImage one_sample(3, 3);
+  RequireNear(LumaSharpness(one_sample.pixels().data(), 3, 3, 3, 1), 0.0f, 1e-6f,
+              "an image with only one interior sample should score zero");
+
+  const TestImage far_too_small(2, 2);
+  RequireNear(LumaSharpness(far_too_small.pixels().data(), 2, 2, 2, 1), 0.0f, 1e-6f,
+              "an image at twice the radius or smaller should score zero");
+}
+
+void TestSharpnessIgnoresRowStridePadding() {
+  const TestImage image = TestImage::Pattern();
+  const int32_t padded_stride = image.width() + 16;
+  std::vector<uint8_t> padded(static_cast<size_t>(padded_stride) * image.height(), 0);
+  for (int32_t y = 0; y < image.height(); ++y) {
+    for (int32_t x = 0; x < image.width(); ++x) {
+      padded[static_cast<size_t>(y) * padded_stride + x] = image.At(x, y);
+    }
+  }
+
+  const float tight_score = LumaSharpness(image.pixels().data(), image.width(),
+                                          image.height(), image.width(), 4);
+  const float padded_score = LumaSharpness(padded.data(), image.width(), image.height(),
+                                           padded_stride, 4);
+  RequireNear(padded_score, tight_score, 1e-3f,
+              "a row stride wider than the image width should not change the score");
+}
+
 // --- KeyframeSelector: spacing decision only, see ADR 14 --------------------
 
 constexpr float kSelectorTargetShift = 0.12f;
@@ -469,6 +534,10 @@ int main() {
       {"rotation residual", TestRotationTriggersResidual},
       {"scale residual", TestScaleChangeTriggersResidual},
       {"sharpness ranking", TestSharpImageOutranksBlurredImage},
+      {"sharpness ranking stable across step", TestSharpnessRankingStableAcrossStep},
+      {"sharpness rejects invalid inputs", TestSharpnessRejectsInvalidInputs},
+      {"sharpness minimum viable image size", TestSharpnessMinimumViableImageSize},
+      {"sharpness ignores row stride padding", TestSharpnessIgnoresRowStridePadding},
       {"selector idle below approach ratio", TestSelectorIdleBelowApproachRatio},
       {"selector window opens near target", TestSelectorWindowOpensNearTarget},
       {"selector confirms window after delay", TestSelectorConfirmsWindowAfterPostCrossingDelay},
