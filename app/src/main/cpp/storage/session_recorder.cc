@@ -162,7 +162,13 @@ bool SessionRecorder::Start(const std::string& root,
   lifecycle_ << "timestamp_ns,event\n";
 
   motion_.Reset();
-  motion_.SetThresholds(config.min_shift, config.min_residual);
+  if (!motion_.SetThresholds(config.min_shift, config.min_residual)) {
+    __android_log_print(ANDROID_LOG_WARN, kTag,
+                        "rejected shift/residual thresholds %.3f/%.3f; kept "
+                        "%.3f/%.3f",
+                        config.min_shift, config.min_residual,
+                        motion_.min_shift(), motion_.min_residual());
+  }
   pending_.Clear();
   writer_.Start([this](PendingFrame& frame) { WriteFrame(frame); });
 

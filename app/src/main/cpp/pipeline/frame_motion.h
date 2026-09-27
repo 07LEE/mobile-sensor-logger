@@ -31,26 +31,39 @@ namespace sensor_logger {
 // offset lines up, which is what the leftover difference measures.
 class FrameMotion {
  public:
+  // Motion is measured on a fixed-width grid and searches this many cells in
+  // either direction. A threshold above this single-axis limit can never be
+  // reached by horizontal or vertical motion alone.
+  static constexpr int32_t kGridWidth = 64;
+  static constexpr int32_t kSearchRadius = 10;
+  static constexpr float kMaxShift =
+      static_cast<float>(kSearchRadius) / static_cast<float>(kGridWidth);
+
   // Fraction of the frame width the picture may slide before the stretch ends.
   static constexpr float kDefaultMinShift = 0.12f;
 
   // How much of the picture may fail to line up at the best offset, as a
   // fraction of full range, before the stretch ends regardless of the offset.
   static constexpr float kDefaultMinResidual = 0.06f;
+  static constexpr float kMaxResidual = 1.0f;
 
   FrameMotion() = default;
 
-  FrameMotion(float min_shift, float min_residual)
-      : min_shift_(min_shift), min_residual_(min_residual) {}
+  FrameMotion(float min_shift, float min_residual) {
+    SetThresholds(min_shift, min_residual);
+  }
 
   // True when the picture has changed enough to start a new stretch, which also
   // makes this frame the reference for the next one.
   bool Accept(const CameraImageView& image);
 
-  void SetThresholds(float min_shift, float min_residual) {
-    min_shift_ = min_shift;
-    min_residual_ = min_residual;
-  }
+  // Invalid values leave the corresponding threshold unchanged. Callers that
+  // read external settings can therefore report the rejection without turning
+  // selection into an unreachable or every-frame condition.
+  bool SetThresholds(float min_shift, float min_residual);
+
+  static bool IsValidShiftThreshold(float value);
+  static bool IsValidResidualThreshold(float value);
 
   float min_shift() const { return min_shift_; }
   float min_residual() const { return min_residual_; }

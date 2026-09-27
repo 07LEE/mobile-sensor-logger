@@ -173,11 +173,12 @@ void TestUnchangedFrameIsRejected() {
 void TestHorizontalSearchLimit() {
   const TestImage reference = TestImage::Pattern();
   const TestImage shifted = Translate(reference, 20, 0);
-  FrameMotion motion(0.18f, 0.49f);
+  FrameMotion motion;
   Require(motion.Accept(reference.View()), "first frame should establish a reference");
-  Require(!motion.Accept(shifted.View()), "0.18 threshold should be unreachable for horizontal search");
-  RequireNear(motion.last_shift(), 10.0f / 64.0f, 1e-6f,
-              "horizontal search should saturate at ten grid columns");
+  Require(motion.Accept(shifted.View()),
+          "a shift at the search limit should still close the default stretch");
+  RequireNear(motion.last_shift(), FrameMotion::kMaxShift, 1e-6f,
+              "horizontal search should saturate at the maximum measurable shift");
   RequireNear(motion.last_residual(), 0.0f, 1e-6f,
               "translated overlap should align exactly at the search limit");
 }
@@ -194,11 +195,48 @@ void TestDefaultShiftClosesStretch() {
 void TestDiagonalMotionIsMeasured() {
   const TestImage reference = TestImage::Pattern();
   const TestImage shifted = Translate(reference, 12, 16);
-  FrameMotion motion(0.49f, 0.49f);
+  FrameMotion motion;
   Require(motion.Accept(reference.View()), "first frame should establish a reference");
-  Require(!motion.Accept(shifted.View()), "high thresholds should retain diagonal sample");
+  Require(motion.Accept(shifted.View()),
+          "diagonal motion at the search limit should close the default stretch");
   RequireNear(motion.last_shift(), 10.0f / 64.0f, 1e-6f,
               "six-by-eight grid translation should have ten-column magnitude");
+}
+
+void TestShiftThresholdBoundaries() {
+  Require(FrameMotion::IsValidShiftThreshold(FrameMotion::kMaxShift - 0.001f),
+          "a value just below the measurable limit should be valid");
+  Require(!FrameMotion::IsValidShiftThreshold(FrameMotion::kMaxShift),
+          "a value at the measurable limit should be invalid");
+  Require(!FrameMotion::IsValidShiftThreshold(FrameMotion::kMaxShift + 0.001f),
+          "a value above the measurable limit should be invalid");
+  Require(!FrameMotion::IsValidShiftThreshold(0.0f),
+          "zero would close every stretch and should be invalid");
+  Require(!FrameMotion::IsValidShiftThreshold(-0.01f),
+          "a negative threshold should be invalid");
+}
+
+void TestResidualThresholdBoundaries() {
+  Require(FrameMotion::IsValidResidualThreshold(FrameMotion::kMaxResidual - 0.001f),
+          "a value just below the residual limit should be valid");
+  Require(!FrameMotion::IsValidResidualThreshold(FrameMotion::kMaxResidual),
+          "a value at the residual limit should be invalid");
+  Require(!FrameMotion::IsValidResidualThreshold(0.0f),
+          "zero would close every stretch and should be invalid");
+}
+
+void TestSetThresholdsRejectsUnreachableValues() {
+  FrameMotion motion;
+  const float default_shift = motion.min_shift();
+  const float default_residual = motion.min_residual();
+  Require(!motion.SetThresholds(0.18f, default_residual),
+          "an unreachable shift threshold should be rejected");
+  RequireNear(motion.min_shift(), default_shift, 1e-6f,
+              "a rejected shift threshold should leave the previous value in place");
+  Require(motion.SetThresholds(0.1f, default_residual),
+          "a reachable shift threshold should be accepted");
+  RequireNear(motion.min_shift(), 0.1f, 1e-6f,
+              "an accepted shift threshold should take effect");
 }
 
 void TestBrightnessChangeTriggersResidual() {
@@ -251,6 +289,9 @@ int main() {
       {"horizontal search limit", TestHorizontalSearchLimit},
       {"default shift", TestDefaultShiftClosesStretch},
       {"diagonal motion", TestDiagonalMotionIsMeasured},
+      {"shift threshold boundaries", TestShiftThresholdBoundaries},
+      {"residual threshold boundaries", TestResidualThresholdBoundaries},
+      {"rejects unreachable thresholds", TestSetThresholdsRejectsUnreachableValues},
       {"brightness residual", TestBrightnessChangeTriggersResidual},
       {"rotation residual", TestRotationTriggersResidual},
       {"scale residual", TestScaleChangeTriggersResidual},

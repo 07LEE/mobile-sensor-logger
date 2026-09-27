@@ -491,7 +491,9 @@ void CycleShift(AppState* state) {
     return;
   }
 
-  constexpr float kSteps[] = {0.06f, 0.09f, 0.12f, 0.18f};
+  // FrameMotion::kMaxShift (10/64 grid cells, ~0.156) bounds this; a preset at
+  // or above it could never be reached by horizontal or vertical motion alone.
+  constexpr float kSteps[] = {0.06f, 0.09f, 0.12f};
   constexpr size_t kStepCount = sizeof(kSteps) / sizeof(kSteps[0]);
 
   size_t index = 2;  // 0.12, the default, if nothing close enough matches

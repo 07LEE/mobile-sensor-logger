@@ -5,19 +5,6 @@
 #include <limits>
 
 namespace sensor_logger {
-namespace {
-
-// The picture is compared at this width. Small enough that a frame costs
-// microseconds and that sensor noise averages out, large enough that the offset
-// search still resolves a fraction of the frame worth caring about.
-constexpr int32_t kGridWidth = 64;
-
-// Offsets searched, in grid columns. Has to exceed the shift threshold, or the
-// search saturates before the threshold is ever crossed and the stretch never
-// ends.
-constexpr int32_t kSearchRadius = 10;
-
-}  // namespace
 
 void FrameMotion::Downsample(const CameraImageView& image,
                              std::vector<uint8_t>* out) {
@@ -104,6 +91,29 @@ void FrameMotion::Reset() {
   last_shift_ = 0.0f;
   last_residual_ = 0.0f;
   rejected_ = 0;
+}
+
+bool FrameMotion::IsValidShiftThreshold(float value) {
+  return value > 0.0f && value < kMaxShift;
+}
+
+bool FrameMotion::IsValidResidualThreshold(float value) {
+  return value > 0.0f && value < kMaxResidual;
+}
+
+bool FrameMotion::SetThresholds(float min_shift, float min_residual) {
+  bool ok = true;
+  if (IsValidShiftThreshold(min_shift)) {
+    min_shift_ = min_shift;
+  } else {
+    ok = false;
+  }
+  if (IsValidResidualThreshold(min_residual)) {
+    min_residual_ = min_residual;
+  } else {
+    ok = false;
+  }
+  return ok;
 }
 
 }  // namespace sensor_logger

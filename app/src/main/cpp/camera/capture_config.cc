@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <fstream>
 
+#include "frame_motion.h"
+
 namespace sensor_logger {
 namespace {
 
@@ -70,19 +72,28 @@ bool CaptureConfig::Load(const std::string& directory) {
         lens = Lens::kExplicit;
         lens_id = value;
       }
-    } else if (key == "shift" || key == "residual") {
-      const double parsed = std::atof(value.c_str());
-      // A threshold of zero would end a stretch on every frame and one above a
-      // half can never be reached, so both are refused rather than silently
-      // turning selection off or on.
-      if (parsed > 0.0 && parsed < 0.5) {
-        (key == "shift" ? min_shift : min_residual) =
-            static_cast<float>(parsed);
+    } else if (key == "shift") {
+      const float parsed = static_cast<float>(std::atof(value.c_str()));
+      // Bounded by what the grid and search radius can ever measure, not an
+      // arbitrary constant: a value at or above FrameMotion::kMaxShift can
+      // never be reached by horizontal or vertical motion alone.
+      if (FrameMotion::IsValidShiftThreshold(parsed)) {
+        min_shift = parsed;
       } else {
         __android_log_print(ANDROID_LOG_WARN, kTag,
-                            "capture.conf: %s must be between 0 and 0.5, got "
-                            "'%s'",
-                            key.c_str(), value.c_str());
+                            "capture.conf: shift must be between 0 and %.5f, "
+                            "got '%s'",
+                            FrameMotion::kMaxShift, value.c_str());
+      }
+    } else if (key == "residual") {
+      const float parsed = static_cast<float>(std::atof(value.c_str()));
+      if (FrameMotion::IsValidResidualThreshold(parsed)) {
+        min_residual = parsed;
+      } else {
+        __android_log_print(ANDROID_LOG_WARN, kTag,
+                            "capture.conf: residual must be between 0 and "
+                            "%.5f, got '%s'",
+                            FrameMotion::kMaxResidual, value.c_str());
       }
     } else if (key == "shutter") {
       if (value == "auto") {
@@ -175,15 +186,16 @@ bool CaptureConfig::Save(const std::string& directory) const {
     file << "lens = main\n";
   }
 
-  // Clamped to what Load() actually accepts (0, 0.5) — otherwise a value that
-  // reached this struct out of range some other way would round-trip through
+  // Clamped to what Load() actually accepts — otherwise a value that reached
+  // this struct out of range some other way would round-trip through
   // capture.conf as something Load() then silently rejects back to whatever
   // default was compiled in, with nothing on disk showing that happened.
-  const auto clamp_threshold = [](float v) {
-    return std::clamp(v, 0.001f, 0.499f);
-  };
-  file << "shift = " << clamp_threshold(min_shift) << "\n";
-  file << "residual = " << clamp_threshold(min_residual) << "\n";
+  file << "shift = "
+       << std::clamp(min_shift, 0.001f, FrameMotion::kMaxShift - 0.001f)
+       << "\n";
+  file << "residual = "
+       << std::clamp(min_residual, 0.001f, FrameMotion::kMaxResidual - 0.001f)
+       << "\n";
 
   if (max_exposure_ns > 0) {
     file << "shutter = 1/" << (1000000000LL / max_exposure_ns) << "\n";
