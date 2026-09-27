@@ -14,7 +14,7 @@ Captured sessions are valuable, non-reproducible sensor datasets consisting of h
 
 ## Decision
 
-Deprecate and remove the "DELETE ALL" bulk action entirely. Implement per-item individual session deletion with a mandatory two-step confirmation state (`[DEL]` -> `[CONFIRM?]`) within the session overlay UI.
+Deprecate and remove the "DELETE ALL" bulk action entirely. Implement per-item individual session deletion with a mandatory two-step confirmation state (`[DEL]`, then `[CONFIRM?]`) within the session overlay UI.
 
 ## Consequences
 

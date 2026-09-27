@@ -21,7 +21,7 @@ Reorganize all native source files into domain-driven subdirectories under `app/
 - `pipeline/`: Sharpness scoring, frame motion shift estimation, and candidate filters.
 - `input/`: Android volume key and touch gesture input propagation.
 
-Update `CMakeLists.txt` and IDE compiler properties to include the new domain directories.
+Update CMakeLists.txt and IDE compiler properties to include the new domain directories.
 
 ## Consequences
 

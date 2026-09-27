@@ -22,9 +22,9 @@ Introduce a single, minimal Java wrapper class (`com.sensor.logger.RecordingServ
 
 Strict scope constraints for Java code:
 
-1. **Zero Domain Logic**: `RecordingService` contains no capture, file I/O, or sensor logic. Its sole responsibility is invoking `startForeground()` with a status bar notification when instructed by C++.
-2. **Native Control**: The C++ native engine (`native_app.cc`) controls the lifecycle of the service via JNI (`StartRecordingService` / `StopRecordingService`) when recording sessions start and stop.
-3. **Architecture Preservation**: All camera management (Camera2 NDK), IMU logging (ASensorManager NDK), frame filtering, and file writing remain 100% in C++ native code.
+1. Zero Domain Logic: `RecordingService` contains no capture, file I/O, or sensor logic. Its sole responsibility is invoking `startForeground()` with a status bar notification when instructed by C++.
+2. Native Control: The C++ native engine (native_app.cc) controls the lifecycle of the service via JNI (`StartRecordingService` / `StopRecordingService`) when recording sessions start and stop.
+3. Architecture Preservation: All camera management (Camera2 NDK), IMU logging (ASensorManager NDK), frame filtering, and file writing remain 100% in C++ native code.
 
 ## Consequences
 

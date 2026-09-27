@@ -1,0 +1,26 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build steps are per language.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install NDK and CMake
+        run: sdkmanager --install "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug

@@ -8,13 +8,13 @@ Accepted.
 
 ## Context
 
-A recording was backgrounded for 45.3 seconds partway through, with `RecordingService` confirmed running via `dumpsys activity services` the whole time. `capture.csv` showed 0% stalled time in the foreground portions (30.6s combined) and 96.8% stalled while backgrounded — nearly the entire background window produced almost no new captures, in a regular ~1-second-every-~3-seconds pattern.
+A recording was backgrounded for 45.3 seconds partway through, with `RecordingService` confirmed running via `dumpsys activity services` the whole time. capture.csv showed 0% stalled time in the foreground portions (30.6s combined) and 96.8% stalled while backgrounded — nearly the entire background window produced almost no new captures, in a regular ~1-second-every-~3-seconds pattern.
 
 [ADR 7](0007-android-foreground-service-for-background-recording.md) added the foreground service specifically so backgrounding wouldn't disrupt capture, and assumed a running service with `foregroundServiceType="camera"` was sufficient. This device runs API 36, newer than the API 34 ADR 7 was written against. The service being alive is not, on this build, enough to keep the camera at its foreground rate.
 
 ## Decision
 
-Log every background/foreground transition during a recording to `lifecycle.csv` (already added, alongside `thermal.csv`), so any future session can show directly whether a gap in `capture.csv` lines up with backgrounding, rather than relying on remembering it. No further mitigation is decided here — a way to keep capture rate up while backgrounded, or to warn the user it degraded, is open follow-up work.
+Log every background/foreground transition during a recording to lifecycle.csv (already added, alongside thermal.csv), so any future session can show directly whether a gap in capture.csv lines up with backgrounding, rather than relying on remembering it. No further mitigation is decided here — a way to keep capture rate up while backgrounded, or to warn the user it degraded, is open follow-up work.
 
 ## Consequences
 

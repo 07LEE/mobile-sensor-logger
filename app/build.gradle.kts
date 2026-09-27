@@ -42,9 +42,26 @@ android {
         }
     }
 
+    // The release key comes from the environment so it never sits in the
+    // repository. Without it the release build is signed with the debug key,
+    // which installs but is not a distribution identity.
+    val releaseKeystore = System.getenv("KEYSTORE_FILE")
+    if (releaseKeystore != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
 
