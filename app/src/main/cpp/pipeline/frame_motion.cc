@@ -31,7 +31,16 @@ void FrameMotion::Measure(const CameraImageView& image) {
   if (!image.valid || image.planes[0].data == nullptr) return;
 
   Downsample(image, &current_);
+  MeasureCurrentGrid();
+}
 
+void FrameMotion::MeasureGrid(const std::vector<uint8_t>& grid, int32_t grid_height) {
+  current_ = grid;
+  grid_height_ = grid_height;
+  MeasureCurrentGrid();
+}
+
+void FrameMotion::MeasureCurrentGrid() {
   // Nothing to compare against yet: the only sensible reference for the first
   // frame of a session (or after Reset()) is itself.
   if (reference_.size() != current_.size()) {

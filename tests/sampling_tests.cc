@@ -1,7 +1,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -10,14 +13,21 @@
 
 #include "frame_motion.h"
 #include "keyframe_selector.h"
+#include "motion_grid_format.h"
+#include "motion_grid_reader.h"
 #include "sharpness.h"
 
 namespace {
 
 using sensor_logger::CameraImageView;
 using sensor_logger::FrameMotion;
+using sensor_logger::GridFrame;
 using sensor_logger::KeyframeSelector;
 using sensor_logger::LumaSharpness;
+using sensor_logger::MotionGridHeader;
+using sensor_logger::ReadMotionGrid;
+using sensor_logger::kMotionGridFormatVersion;
+using sensor_logger::kMotionGridMagic;
 
 constexpr int32_t kWidth = 128;
 constexpr int32_t kHeight = 96;
@@ -515,6 +525,128 @@ void TestSelectorResetClearsState() {
           "Reset() should restart the stationary ceiling from the next observation");
 }
 
+// --- motion_grid.bin format: writer/reader roundtrip and corruption --------
+// See ADR 15. There is no on-device writer to test on the host (SessionRecorder
+// needs Android), so these write the format by hand the way it does.
+
+class ScratchFile {
+ public:
+  explicit ScratchFile(const std::string& name) : path_(name) {}
+  ~ScratchFile() { std::remove(path_.c_str()); }
+  const std::string& path() const { return path_; }
+
+ private:
+  std::string path_;
+};
+
+void WriteHeader(std::ofstream& out, uint32_t format_version, int32_t grid_width,
+                 int32_t grid_height) {
+  MotionGridHeader header;
+  std::memcpy(header.magic, kMotionGridMagic, sizeof(header.magic));
+  header.format_version = format_version;
+  header.grid_width = grid_width;
+  header.grid_height = grid_height;
+  out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+}
+
+void WriteRecord(std::ofstream& out, int64_t timestamp_ns,
+                 const std::vector<uint8_t>& grid) {
+  out.write(reinterpret_cast<const char*>(&timestamp_ns), sizeof(timestamp_ns));
+  out.write(reinterpret_cast<const char*>(grid.data()),
+           static_cast<std::streamsize>(grid.size()));
+}
+
+void TestMotionGridRoundTrip() {
+  ScratchFile file("motion_grid_roundtrip_test.bin");
+  {
+    std::ofstream out(file.path(), std::ios::binary | std::ios::trunc);
+    WriteHeader(out, kMotionGridFormatVersion, 4, 3);
+    WriteRecord(out, 1000, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+    WriteRecord(out, 2000, {12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1});
+  }
+
+  MotionGridHeader header;
+  std::vector<GridFrame> frames;
+  std::string error;
+  Require(ReadMotionGrid(file.path(), &header, &frames, &error),
+          "a well-formed file should read back cleanly: " + error);
+  Require(header.grid_width == 4 && header.grid_height == 3,
+          "the header's grid dimensions should round-trip");
+  Require(frames.size() == 2, "both records should be decoded");
+  Require(frames[0].timestamp_ns == 1000 && frames[1].timestamp_ns == 2000,
+          "timestamps should round-trip in order");
+  Require(frames[1].grid[0] == 12 && frames[1].grid[11] == 1,
+          "grid bytes should round-trip without reordering");
+}
+
+void TestMotionGridReportsMissingFile() {
+  MotionGridHeader header;
+  std::vector<GridFrame> frames;
+  std::string error;
+  Require(!ReadMotionGrid("this_file_does_not_exist.bin", &header, &frames, &error),
+          "a missing file should not read as if it were empty");
+  Require(!error.empty(), "a missing file should leave a non-empty error message");
+}
+
+void TestMotionGridRejectsBadMagic() {
+  ScratchFile file("motion_grid_bad_magic_test.bin");
+  {
+    std::ofstream out(file.path(), std::ios::binary | std::ios::trunc);
+    MotionGridHeader header;
+    std::memcpy(header.magic, "NOPE", sizeof(header.magic));
+    header.format_version = kMotionGridFormatVersion;
+    header.grid_width = 4;
+    header.grid_height = 3;
+    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+  }
+
+  MotionGridHeader header;
+  std::vector<GridFrame> frames;
+  std::string error;
+  Require(!ReadMotionGrid(file.path(), &header, &frames, &error),
+          "a file with the wrong magic should be rejected, not misread as version 0");
+}
+
+void TestMotionGridRejectsUnsupportedVersion() {
+  ScratchFile file("motion_grid_bad_version_test.bin");
+  {
+    std::ofstream out(file.path(), std::ios::binary | std::ios::trunc);
+    WriteHeader(out, kMotionGridFormatVersion + 1, 4, 3);
+  }
+
+  MotionGridHeader header;
+  std::vector<GridFrame> frames;
+  std::string error;
+  Require(!ReadMotionGrid(file.path(), &header, &frames, &error),
+          "a newer format_version than this reader knows should be rejected outright, "
+          "not silently misinterpreted as the current one");
+}
+
+void TestMotionGridDetectsTruncation() {
+  ScratchFile file("motion_grid_truncated_test.bin");
+  {
+    std::ofstream out(file.path(), std::ios::binary | std::ios::trunc);
+    WriteHeader(out, kMotionGridFormatVersion, 4, 3);
+    WriteRecord(out, 1000, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+    // A second record cut short mid-grid — the failure mode an app getting
+    // killed mid-write actually produces, not a clean multiple of records.
+    const int64_t timestamp_ns = 2000;
+    out.write(reinterpret_cast<const char*>(&timestamp_ns), sizeof(timestamp_ns));
+    const std::vector<uint8_t> partial_grid = {1, 2, 3};
+    out.write(reinterpret_cast<const char*>(partial_grid.data()),
+             static_cast<std::streamsize>(partial_grid.size()));
+  }
+
+  MotionGridHeader header;
+  std::vector<GridFrame> frames;
+  std::string error;
+  Require(!ReadMotionGrid(file.path(), &header, &frames, &error),
+          "a truncated trailing record should be reported, not silently dropped or "
+          "misread as a shorter grid");
+  Require(frames.empty(),
+          "a rejected file should not hand back a partially-decoded frame list");
+}
+
 }  // namespace
 
 int main() {
@@ -545,6 +677,11 @@ int main() {
       {"selector stationary timeout fires", TestSelectorStationaryTimeoutFires},
       {"selector confirmed restarts timers", TestSelectorConfirmedRestartsTimers},
       {"selector reset clears state", TestSelectorResetClearsState},
+      {"motion grid round trip", TestMotionGridRoundTrip},
+      {"motion grid reports missing file", TestMotionGridReportsMissingFile},
+      {"motion grid rejects bad magic", TestMotionGridRejectsBadMagic},
+      {"motion grid rejects unsupported version", TestMotionGridRejectsUnsupportedVersion},
+      {"motion grid detects truncation", TestMotionGridDetectsTruncation},
   };
 
   for (const auto& [name, test] : tests) {

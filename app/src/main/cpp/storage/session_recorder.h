@@ -162,6 +162,7 @@ class SessionRecorder {
   };
 
   void WriteCandidate(int64_t timestamp_ns, float sharpness);
+  void WriteMotionGridRecord(int64_t timestamp_ns);
   void FlushPendingFrame(PendingFrame& frame);
   void SetCandidate(Candidate* candidate, const FrameData& frame, float sharpness);
   void ConfirmKeyframe(Candidate* winner, int64_t timestamp_ns);
@@ -183,6 +184,12 @@ class SessionRecorder {
   std::ofstream capture_;
   std::ofstream thermal_;
   std::ofstream lifecycle_;
+
+  // ADR 15's replay input. Opened in Start() like the other logs, but its
+  // header needs grid_height, which FrameMotion only knows after its first
+  // Measure() call — so it is written lazily, on the first record.
+  std::ofstream motion_grid_;
+  bool motion_grid_header_written_ = false;
 
   FrameMotion motion_;
   KeyframeSelector selector_;

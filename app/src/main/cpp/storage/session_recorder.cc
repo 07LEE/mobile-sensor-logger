@@ -11,6 +11,7 @@
 #include <cstring>
 #include <utility>
 
+#include "motion_grid_format.h"
 #include "sharpness.h"
 
 namespace sensor_logger {
@@ -139,14 +140,18 @@ bool SessionRecorder::Start(const std::string& root,
   capture_.open(session_path_ + "/capture.csv", std::ios::out | std::ios::trunc);
   thermal_.open(session_path_ + "/thermal.csv", std::ios::out | std::ios::trunc);
   lifecycle_.open(session_path_ + "/lifecycle.csv", std::ios::out | std::ios::trunc);
+  motion_grid_.open(session_path_ + "/motion_grid.bin",
+                    std::ios::out | std::ios::trunc | std::ios::binary);
   if (!frames_.is_open() || !imu_.is_open() || !candidates_.is_open() ||
-      !capture_.is_open() || !thermal_.is_open() || !lifecycle_.is_open()) {
+      !capture_.is_open() || !thermal_.is_open() || !lifecycle_.is_open() ||
+      !motion_grid_.is_open()) {
     frames_.close();
     imu_.close();
     candidates_.close();
     capture_.close();
     thermal_.close();
     lifecycle_.close();
+    motion_grid_.close();
     return false;
   }
 
@@ -163,6 +168,7 @@ bool SessionRecorder::Start(const std::string& root,
 
   motion_.Reset();
   selector_.Reset();
+  motion_grid_header_written_ = false;
   if (!motion_.SetThresholds(config.min_shift, config.min_residual)) {
     __android_log_print(ANDROID_LOG_WARN, kTag,
                         "rejected shift/residual thresholds %.3f/%.3f; kept "
@@ -216,6 +222,7 @@ void SessionRecorder::Record(const FrameData& frame) {
   const bool had_reference = motion_.has_reference();
   motion_.Measure(frame.image);
   WriteCandidate(frame.timestamp_ns, sharpness);
+  WriteMotionGridRecord(frame.timestamp_ns);
 
   // Keeping everything skips the comparison entirely: each frame goes straight
   // out, and the sharpness and motion still land in candidates.csv so the
@@ -358,6 +365,26 @@ void SessionRecorder::WriteCandidate(int64_t timestamp_ns, float sharpness) {
   }
 }
 
+void SessionRecorder::WriteMotionGridRecord(int64_t timestamp_ns) {
+  if (!motion_grid_header_written_) {
+    MotionGridHeader header;
+    std::memcpy(header.magic, kMotionGridMagic, sizeof(header.magic));
+    header.format_version = kMotionGridFormatVersion;
+    header.grid_width = FrameMotion::kGridWidth;
+    header.grid_height = motion_.current_grid_height();
+    motion_grid_.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    motion_grid_header_written_ = true;
+  }
+
+  motion_grid_.write(reinterpret_cast<const char*>(&timestamp_ns), sizeof(timestamp_ns));
+  const std::vector<uint8_t>& grid = motion_.current_grid();
+  motion_grid_.write(reinterpret_cast<const char*>(grid.data()),
+                     static_cast<std::streamsize>(grid.size()));
+  if (!motion_grid_.good()) {
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "motion_grid.bin write failed");
+  }
+}
+
 void SessionRecorder::FlushPendingFrame(PendingFrame& frame) {
   if (!frame.valid()) return;
 
@@ -438,6 +465,7 @@ void SessionRecorder::Stop(const LocationData& end_location) {
   capture_.close();
   thermal_.close();
   lifecycle_.close();
+  motion_grid_.close();
   WriteManifest(last_timestamp_ns_, end_location);
   recording_ = false;
 }
