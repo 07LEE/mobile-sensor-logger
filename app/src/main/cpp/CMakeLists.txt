@@ -19,6 +19,7 @@ add_library(sensor_logger SHARED
     native_app.cc
     camera/camera_source.cc
     camera/capture_config.cc
+    camera/fps_selection.cc
     pipeline/frame_motion.cc
     pipeline/keyframe_selector.cc
     pipeline/pending_frame.cc

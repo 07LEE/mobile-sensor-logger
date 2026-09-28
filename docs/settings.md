@@ -60,6 +60,8 @@ On the tested device the ceiling is a fixed 30fps in a bright room and a measure
 
 This is about rate only, not exposure: shutter speed is capped separately by `shutter`, or is whatever the scene metered to, and does not move again once recording starts regardless of what `fps` is set to. Pinning `fps` below the sensor's ceiling does not shorten the exposure on its own — capping `shutter` is still the way to fight motion blur.
 
+A fixed value is applied only when the selected camera advertises that exact fixed range and the chosen capture resolution can produce frames that fast. Unsupported values stay saved as the request but run in auto mode; for example, the panel shows `FPS: 60>AUTO`, the log explains which capability failed, and session.json records the request, applied value and observed result separately.
+
 ## Running out of room
 
 A frame at full resolution is around 19MB, and a session writes two or three a second, so plan on 2 to 3GB per minute. The readout carries the measured rate and what is left at it.

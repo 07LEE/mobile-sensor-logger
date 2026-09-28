@@ -34,10 +34,9 @@ struct CaptureResult {
   int32_t awb_state = -1;
   int32_t af_state = -1;
 
-  // What the platform picked without being asked: nothing in this app sets
-  // ACAMERA_CONTROL_AE_TARGET_FPS_RANGE, so the rate the capture stream
-  // actually ran at is a default rather than a decision, and worth recording
-  // as one. -1 when the camera did not report it.
+  // What the platform reports it used. This is either the validated fixed
+  // range the app applied or the platform's own range in auto mode. -1 when
+  // the camera did not report it.
   int32_t fps_range_min = -1;
   int32_t fps_range_max = -1;
 

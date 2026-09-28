@@ -218,6 +218,7 @@ bool SessionRecorder::Start(const std::string& root,
   camera_completed_captures_ = 0;
   frames_without_image_ = 0;
   imu_samples_ = 0;
+  camera_timing_.Reset();
   accelerometer_timing_.Reset();
   gyroscope_timing_.Reset();
 
@@ -354,6 +355,9 @@ void SessionRecorder::RecordCaptureResults(
   capture_.flush();
   if (capture_.good()) {
     camera_completed_captures_ += static_cast<int64_t>(results.size());
+    for (const CaptureResult& result : results) {
+      camera_timing_.Observe(result.timestamp_ns);
+    }
   } else {
     __android_log_print(ANDROID_LOG_ERROR, kTag,
                         "capture.csv write failed; completed-capture count "
@@ -515,6 +519,11 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
       accelerometer_timing_.Snapshot();
   const TimestampStatsSnapshot gyroscope_timing =
       gyroscope_timing_.Snapshot();
+  const TimestampStatsSnapshot camera_timing = camera_timing_.Snapshot();
+  const double camera_observed_fps =
+      camera_timing.mean_period_ns > 0
+          ? 1e9 / static_cast<double>(camera_timing.mean_period_ns)
+          : 0.0;
 
   double fov_h = 0.0;
   double fov_v = 0.0;
@@ -548,6 +557,29 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
            << "  \"duration_seconds\": " << duration_seconds << ",\n"
            << "  \"average_fps\": " << average_fps << ",\n"
+           << "  \"camera_fps_requested\": " << camera_.requested_fps
+           << ",\n"
+           << "  \"camera_fps_applied\": " << camera_.applied_fps << ",\n"
+           << "  \"camera_fps_request_supported\": "
+           << (camera_.fps_request_supported ? "true" : "false") << ",\n"
+           << "  \"camera_fps_set_result\": " << camera_.fps_set_result
+           << ",\n"
+           << "  \"camera_fixed_fps_range_available\": "
+           << (camera_.fixed_fps_range_available ? "true" : "false")
+           << ",\n"
+           << "  \"camera_min_frame_duration_ns\": "
+           << camera_.min_frame_duration_ns << ",\n"
+           << "  \"camera_max_output_fps\": " << camera_.max_output_fps
+           << ",\n"
+           << "  \"camera_observed_fps\": " << camera_observed_fps << ",\n"
+           << "  \"camera_mean_period_ns\": " << camera_timing.mean_period_ns
+           << ",\n"
+           << "  \"camera_median_period_ns\": "
+           << camera_timing.median_period_ns << ",\n"
+           << "  \"camera_max_gap_ns\": " << camera_timing.max_gap_ns
+           << ",\n"
+           << "  \"camera_non_monotonic_timestamps\": "
+           << camera_timing.non_monotonic_timestamps << ",\n"
            << "  \"thermal_sample_target_interval_ns\": "
            << kDeviceStatusSampleIntervalNs << ",\n"
            << "  \"free_space_check_target_interval_ns\": "

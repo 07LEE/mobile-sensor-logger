@@ -53,3 +53,18 @@ target_compile_options(timestamp_stats_tests PRIVATE
 )
 
 add_test(NAME timestamp_stats_tests COMMAND timestamp_stats_tests)
+
+add_executable(fps_selection_tests
+    fps_selection_tests.cc
+    ../app/src/main/cpp/camera/fps_selection.cc
+)
+
+target_include_directories(fps_selection_tests PRIVATE
+    ../app/src/main/cpp/camera
+)
+
+target_compile_options(fps_selection_tests PRIVATE
+    -Wall -Wextra -Wpedantic -Werror
+)
+
+add_test(NAME fps_selection_tests COMMAND fps_selection_tests)

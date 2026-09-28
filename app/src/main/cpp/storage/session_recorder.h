@@ -229,6 +229,7 @@ class SessionRecorder {
   int64_t considered_frames_ = 0;
   int64_t camera_completed_captures_ = 0;
   int64_t imu_samples_ = 0;
+  TimestampStats camera_timing_;
   TimestampStats accelerometer_timing_;
   TimestampStats gyroscope_timing_;
 };

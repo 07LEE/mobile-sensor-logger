@@ -1080,9 +1080,13 @@ extern "C" void android_main(android_app* app) {
                       : "AUTO");
 
     char fps_label[24];
-    if (state.config.fixed_fps > 0) {
-      std::snprintf(fps_label, sizeof(fps_label), "FPS: %d",
+    if (state.config.fixed_fps > 0 &&
+        state.camera.info().applied_fps != state.config.fixed_fps) {
+      std::snprintf(fps_label, sizeof(fps_label), "FPS: %d>AUTO",
                     state.config.fixed_fps);
+    } else if (state.camera.info().applied_fps > 0) {
+      std::snprintf(fps_label, sizeof(fps_label), "FPS: %d",
+                    state.camera.info().applied_fps);
     } else {
       std::snprintf(fps_label, sizeof(fps_label), "FPS: AUTO");
     }
