@@ -23,3 +23,18 @@ target_include_directories(sampling_tests PRIVATE
 target_compile_options(sampling_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
 add_test(NAME sampling_tests COMMAND sampling_tests)
+
+add_executable(periodic_schedule_tests
+    periodic_schedule_tests.cc
+    ../app/src/main/cpp/platform/periodic_schedule.cc
+)
+
+target_include_directories(periodic_schedule_tests PRIVATE
+    ../app/src/main/cpp/platform
+)
+
+target_compile_options(periodic_schedule_tests PRIVATE
+    -Wall -Wextra -Wpedantic -Werror
+)
+
+add_test(NAME periodic_schedule_tests COMMAND periodic_schedule_tests)

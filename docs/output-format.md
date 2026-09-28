@@ -20,7 +20,7 @@ adb pull /sdcard/Android/data/com.sensor.logger/files/sessions data/
 | candidates.csv | `timestamp_ns, sharpness, shift, residual` — one row per frame scored, kept or not |
 | motion_grid.bin | Binary, one downsampled luma grid per scored frame — the offline replay input; see below |
 | capture.csv | `timestamp_ns, exposure_ns, sensitivity, focus_diopters, rolling_shutter_skew_ns, ae_state, awb_state, af_state, fps_range_min, fps_range_max, physical_id` — one row per frame the camera finished |
-| thermal.csv | `timestamp_ns, thermal_status, battery_temp_c` — sampled periodically, not per frame; `thermal_status` is `-1` below API 29 (see [ADR 9](adr/0009-log-thermal-status-and-battery-temperature.md)) |
+| thermal.csv | `timestamp_ns, thermal_status, battery_temp_c` — sampled on a two-second `CLOCK_BOOTTIME` schedule, not per frame; `timestamp_ns` is the query time and `thermal_status` is `-1` below API 29 (see [ADR 9](adr/0009-log-thermal-status-and-battery-temperature.md)) |
 | lifecycle.csv | `timestamp_ns, event` — `event` is `background` or `foreground`, written on each transition while recording |
 | session.json | Which phone and camera it came from, counts, and units |
 
@@ -48,6 +48,8 @@ session.json opens with `app_version_name` and `app_version_code`, then `device`
 It also carries `camera_id`, `focal_length_mm`, `aperture` and `sensor_size_mm`. Frames from different lenses cannot be solved as one camera — an ultra-wide and a periscope disagree about focal length by a factor of eight — so this is what says which one a session is.
 
 It also carries what capture.conf the session actually ran with — `retention`, `min_shift`, `min_residual`, `shutter`, `mains_hz`, `fps` — next to what was measured — `written_frames`, `considered_frames`, `dropped_frames`, `camera_completed_captures`, `frames_lost_upstream`, `average_fps` — so a setting and its effect can be told apart later instead of assumed. See [settings.md](settings.md#running-out-of-room) for what the count fields mean and which should be zero.
+
+`thermal_sample_target_interval_ns` and `free_space_check_target_interval_ns` record the intended two-second schedules. They use `CLOCK_BOOTTIME`, so camera FPS, preview visibility and time spent suspended do not redefine the interval. A busy or suspended process can observe a late sample; missed intervals are skipped rather than emitted as a burst.
 
 ### Replaying the selection rule
 

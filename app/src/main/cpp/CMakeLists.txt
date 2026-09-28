@@ -34,6 +34,7 @@ add_library(sensor_logger SHARED
     input/input.cc
     platform/device_status.cc
     platform/location.cc
+    platform/periodic_schedule.cc
     platform/permissions.cc
     platform/recording_service.cc
 )

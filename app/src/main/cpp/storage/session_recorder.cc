@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "motion_grid_format.h"
+#include "periodic_schedule.h"
 #include "sharpness.h"
 
 namespace sensor_logger {
@@ -515,6 +516,10 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
            << "  \"duration_seconds\": " << duration_seconds << ",\n"
            << "  \"average_fps\": " << average_fps << ",\n"
+           << "  \"thermal_sample_target_interval_ns\": "
+           << kDeviceStatusSampleIntervalNs << ",\n"
+           << "  \"free_space_check_target_interval_ns\": "
+           << kFreeSpaceCheckIntervalNs << ",\n"
            << "  \"written_frames\": " << written_frames_.load() << ",\n"
            << "  \"written_bytes\": " << written_bytes_.load() << ",\n"
            << "  \"considered_frames\": " << considered_frames_ << ",\n"

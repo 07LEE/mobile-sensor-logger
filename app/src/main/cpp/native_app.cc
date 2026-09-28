@@ -21,6 +21,7 @@
 #include "location.h"
 #include "log.h"
 #include "permissions.h"
+#include "periodic_schedule.h"
 #include "preview_renderer.h"
 #include "recording_service.h"
 #include "session_recorder.h"
@@ -39,6 +40,7 @@ using sensor_logger::Action;
 using sensor_logger::ImuSource;
 using sensor_logger::Input;
 using sensor_logger::PendingFrame;
+using sensor_logger::PeriodicSchedule;
 using sensor_logger::PreviewRenderer;
 using sensor_logger::SessionRecorder;
 using sensor_logger::SessionsOverlay;
@@ -79,16 +81,20 @@ struct AppState {
   // shared storage is a round trip through the filesystem daemon, and the
   // number moves slowly enough that a couple of seconds stale is honest.
   int64_t free_bytes = 0;
-  int free_space_countdown = 0;
+  PeriodicSchedule free_space_schedule{
+      sensor_logger::kFreeSpaceCheckIntervalNs};
   int64_t last_timestamp_ns = 0;
 
-  // Same cadence as free_space_countdown, for the same reason: cheap enough
-  // to poll often. Polled whether or not anything is recording — battery
+  // Same cadence as the free-space schedule, for the same reason: cheap enough
+  // to poll often. Both schedules use CLOCK_BOOTTIME rather than camera frames,
+  // so a stalled camera or a different FPS does not change their meaning.
+  // Polled whether or not anything is recording — battery
   // percent is shown on the HUD all the time — but only written to
   // thermal.csv while recording, where the point (see ADR 9) is lining a
   // throttling event up against a capture.csv gap a couple of seconds wide,
   // not catching the exact frame it started on.
-  int thermal_countdown = 0;
+  PeriodicSchedule thermal_schedule{
+      sensor_logger::kDeviceStatusSampleIntervalNs};
   ThermalSample last_thermal;
 
   // The camera's own account of the last frame it finished, kept whether or not
@@ -302,6 +308,43 @@ void RevertExtrinsicModeIfActive(AppState* state) {
   state->extrinsic_mode_active = false;
 }
 
+void PollPeriodicStatus(AppState* state) {
+  const int64_t now_ns = sensor_logger::BoottimeNowNs();
+
+  if (state->free_space_schedule.Due(now_ns)) {
+    // The files directory rather than the sessions directory: the latter is
+    // not created until the first session starts, and statvfs on a path that
+    // does not exist reports no space at all.
+    state->free_bytes = FreeBytes(FilesRoot(state->app));
+
+    if (state->recorder.is_recording() &&
+        state->free_bytes < kMinimumFreeBytes) {
+      LocationData end_loc = GetLocationData(state->app);
+      state->recorder.Stop(end_loc);
+      StopRecordingService(state->app);
+      state->camera.UnlockExposureAndFocus();
+      RevertExtrinsicModeIfActive(state);
+      state->stop_reason = "STOPPED - DISK FULL";
+      __android_log_print(ANDROID_LOG_WARN, kTag,
+                          "stopped: %lld bytes free, %lld written",
+                          (long long)state->free_bytes,
+                          (long long)state->recorder.written_frames());
+    }
+  }
+
+  // Read for the HUD even outside a recording. A recording persists the
+  // query's own CLOCK_BOOTTIME timestamp, not the last camera timestamp.
+  if (state->thermal_schedule.Due(now_ns)) {
+    state->last_thermal = ReadThermalSample(state->app);
+    if (state->recorder.is_recording()) {
+      state->recorder.RecordThermal(
+          state->last_thermal.timestamp_ns,
+          state->last_thermal.thermal_status,
+          state->last_thermal.battery_temp_c);
+    }
+  }
+}
+
 void ToggleRecording(AppState* state) {
   if (state->recorder.is_recording()) {
     LocationData end_loc = GetLocationData(state->app);
@@ -348,8 +391,8 @@ void ToggleRecording(AppState* state) {
     StartRecordingService(state->app);
     state->stop_reason = nullptr;
     // So the first thermal sample lands promptly rather than waiting out
-    // however much of the countdown was left over from a previous session.
-    state->thermal_countdown = 0;
+    // however much of the schedule was left over from a previous session.
+    state->thermal_schedule.Reset();
     __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
                         state->recorder.session_path().c_str());
   } else {
@@ -862,6 +905,11 @@ extern "C" void android_main(android_app* app) {
       }
     }
 
+    // Deliberately before the permission/camera early exits below. Status
+    // polling is a time-based platform task and must continue even if no camera
+    // frame arrives or the activity is backgrounded during a recording.
+    PollPeriodicStatus(&state);
+
     if (!state.permission_granted) {
       state.permission_granted = HasCameraPermission(app);
       if (state.permission_granted) {
@@ -991,44 +1039,6 @@ extern "C" void android_main(android_app* app) {
             state.pro_panel_visible = true;
           }
         }
-      }
-    }
-
-    // Every couple of seconds at camera rate.
-    if (--state.free_space_countdown <= 0) {
-      // The files directory rather than the sessions directory: the latter is
-      // not created until the first session starts, and statvfs on a path that
-      // does not exist reports no space at all.
-      state.free_bytes = FreeBytes(FilesRoot(app));
-      state.free_space_countdown = 60;
-
-      if (state.recorder.is_recording() &&
-          state.free_bytes < kMinimumFreeBytes) {
-        LocationData end_loc = GetLocationData(app);
-        state.recorder.Stop(end_loc);
-        StopRecordingService(app);
-        state.camera.UnlockExposureAndFocus();
-        RevertExtrinsicModeIfActive(&state);
-        state.stop_reason = "STOPPED - DISK FULL";
-        __android_log_print(ANDROID_LOG_WARN, kTag,
-                            "stopped: %lld bytes free, %lld written",
-                            (long long)state.free_bytes,
-                            (long long)state.recorder.written_frames());
-      }
-    }
-
-    // Same cadence as the free-space check. Polled here regardless of
-    // recording, for the HUD's battery percent; only written to thermal.csv
-    // while recording, where the point (ADR 9) is lining a throttling event
-    // up against a gap in capture.csv, which is meaningless outside a
-    // session.
-    if (--state.thermal_countdown <= 0) {
-      state.thermal_countdown = 60;
-      state.last_thermal = ReadThermalSample(app);
-      if (state.recorder.is_recording()) {
-        state.recorder.RecordThermal(state.last_timestamp_ns,
-                                     state.last_thermal.thermal_status,
-                                     state.last_thermal.battery_temp_c);
       }
     }
 
