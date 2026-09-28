@@ -65,6 +65,26 @@ void WriteLocationField(std::ofstream& out, const char* key,
   }
 }
 
+void WriteImuSensorField(std::ofstream& out, const char* key,
+                         const ImuSensorInfo& info,
+                         const TimestampStatsSnapshot& timing) {
+  out << "  \"" << key << "\": {\n"
+      << "    \"available\": " << (info.available ? "true" : "false")
+      << ",\n"
+      << "    \"name\": \"" << Escaped(info.name) << "\",\n"
+      << "    \"vendor\": \"" << Escaped(info.vendor) << "\",\n"
+      << "    \"min_delay_us\": " << info.min_delay_us << ",\n"
+      << "    \"enable_result\": " << info.enable_result << ",\n"
+      << "    \"set_rate_result\": " << info.set_rate_result << ",\n"
+      << "    \"samples\": " << timing.samples << ",\n"
+      << "    \"mean_period_ns\": " << timing.mean_period_ns << ",\n"
+      << "    \"median_period_ns\": " << timing.median_period_ns << ",\n"
+      << "    \"max_gap_ns\": " << timing.max_gap_ns << ",\n"
+      << "    \"non_monotonic_timestamps\": "
+      << timing.non_monotonic_timestamps << "\n"
+      << "  },\n";
+}
+
 bool DirectoryExists(const std::string& path) {
   struct stat info{};
   return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
@@ -112,6 +132,7 @@ bool SessionRecorder::Start(const std::string& root,
                             int64_t start_timestamp_ns,
                             const CameraInfo& camera,
                             const CaptureConfig& config,
+                            const ImuInfo& imu,
                             const LocationData& start_location) {
   if (recording_) return false;
   if (!MakeDirectory(root)) return false;
@@ -185,6 +206,7 @@ bool SessionRecorder::Start(const std::string& root,
   start_timestamp_ns_ = start_timestamp_ns;
   start_location_ = start_location;
   camera_ = camera;
+  imu_info_ = imu;
   retention_ = config.retention;
   max_exposure_ns_ = config.max_exposure_ns;
   mains_hz_ = config.mains_hz;
@@ -196,6 +218,8 @@ bool SessionRecorder::Start(const std::string& root,
   camera_completed_captures_ = 0;
   frames_without_image_ = 0;
   imu_samples_ = 0;
+  accelerometer_timing_.Reset();
+  gyroscope_timing_.Reset();
 
   recording_ = true;
   return true;
@@ -304,6 +328,10 @@ void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
   // straight into the manifest a workstation trusts as "every sample landed."
   if (imu_.good()) {
     imu_samples_ += static_cast<int64_t>(samples.size());
+    for (const ImuSample& sample : samples) {
+      (sample.is_gyroscope ? gyroscope_timing_ : accelerometer_timing_)
+          .Observe(sample.timestamp_ns);
+    }
   } else {
     __android_log_print(ANDROID_LOG_ERROR, kTag,
                         "imu.csv write failed; sample count now understates "
@@ -483,6 +511,10 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
           : 0.0;
   const double average_fps =
       (duration_seconds > 0.0) ? (considered_frames_ / duration_seconds) : 0.0;
+  const TimestampStatsSnapshot accelerometer_timing =
+      accelerometer_timing_.Snapshot();
+  const TimestampStatsSnapshot gyroscope_timing =
+      gyroscope_timing_.Snapshot();
 
   double fov_h = 0.0;
   double fov_v = 0.0;
@@ -535,7 +567,13 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
               "newer image instead; not counted by dropped_frames, which is "
               "the writer queue only\",\n"
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
-           << "  \"retention\": \""
+           << "  \"imu_requested_interval_us\": "
+           << imu_info_.requested_interval_us << ",\n";
+  WriteImuSensorField(manifest, "accelerometer", imu_info_.accelerometer,
+                      accelerometer_timing);
+  WriteImuSensorField(manifest, "gyroscope", imu_info_.gyroscope,
+                      gyroscope_timing);
+  manifest << "  \"retention\": \""
            << (retention_ == Retention::kAll ? "all" : "sharpest") << "\",\n"
            << "  \"min_shift\": " << motion_.min_shift() << ",\n"
            << "  \"min_residual\": " << motion_.min_residual() << ",\n"

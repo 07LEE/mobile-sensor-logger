@@ -17,6 +17,7 @@
 #include "location.h"
 #include "pending_frame.h"
 #include "session_item.h"
+#include "timestamp_stats.h"
 
 namespace sensor_logger {
 
@@ -66,6 +67,7 @@ class SessionRecorder {
   // Creates the session directory under `root` and opens the log files.
   bool Start(const std::string& root, int64_t start_timestamp_ns,
              const CameraInfo& camera, const CaptureConfig& config,
+             const ImuInfo& imu,
              const LocationData& start_location = LocationData());
 
   // Offers a frame. Scored and buffered; written only if it ends up the
@@ -210,6 +212,7 @@ class SessionRecorder {
   int64_t start_timestamp_ns_ = 0;
   LocationData start_location_{};
   CameraInfo camera_{};
+  ImuInfo imu_info_{};
   Retention retention_ = Retention::kSharpest;
 
   // Carried through from CaptureConfig only for the manifest: what a session
@@ -226,6 +229,8 @@ class SessionRecorder {
   int64_t considered_frames_ = 0;
   int64_t camera_completed_captures_ = 0;
   int64_t imu_samples_ = 0;
+  TimestampStats accelerometer_timing_;
+  TimestampStats gyroscope_timing_;
 };
 
 }  // namespace sensor_logger

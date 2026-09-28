@@ -51,6 +51,8 @@ It also carries what capture.conf the session actually ran with — `retention`,
 
 `thermal_sample_target_interval_ns` and `free_space_check_target_interval_ns` record the intended two-second schedules. They use `CLOCK_BOOTTIME`, so camera FPS, preview visibility and time spent suspended do not redefine the interval. A busy or suspended process can observe a late sample; missed intervals are skipped rather than emitted as a burst.
 
+`imu_requested_interval_us` records the requested IMU interval. The nested `accelerometer` and `gyroscope` objects record whether each sensor was available, its name, vendor and minimum delay, the results returned when enabling it and setting its rate, and the delivered sample count, mean period, approximate median period, maximum gap and non-monotonic timestamp count. A successful rate request is not proof that the platform delivered that rate; the timing summary is the observed result.
+
 ### Replaying the selection rule
 
 candidates.csv records what the on-device run actually measured against the reference chain its own thresholds produced — sharpness (never threshold-dependent) alongside shift/residual (specific to that run). To ask what a different `min_shift`/`min_residual` would have kept, without reshooting, motion_grid.bin carries what those thresholds would need: the same downsampled luma grid `FrameMotion` computes internally for every scored frame, small enough (`grid_width * grid_height` bytes — 3072 at this project's usual 4:3 capture) to record unconditionally alongside candidates.csv.

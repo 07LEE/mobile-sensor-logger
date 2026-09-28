@@ -38,3 +38,18 @@ target_compile_options(periodic_schedule_tests PRIVATE
 )
 
 add_test(NAME periodic_schedule_tests COMMAND periodic_schedule_tests)
+
+add_executable(timestamp_stats_tests
+    timestamp_stats_tests.cc
+    ../app/src/main/cpp/pipeline/timestamp_stats.cc
+)
+
+target_include_directories(timestamp_stats_tests PRIVATE
+    ../app/src/main/cpp/pipeline
+)
+
+target_compile_options(timestamp_stats_tests PRIVATE
+    -Wall -Wextra -Wpedantic -Werror
+)
+
+add_test(NAME timestamp_stats_tests COMMAND timestamp_stats_tests)

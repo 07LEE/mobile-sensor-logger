@@ -5,6 +5,7 @@
 #include <android/sensor.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace sensor_logger {
@@ -20,6 +21,23 @@ struct ImuSample {
   float x;
   float y;
   float z;
+};
+
+struct ImuSensorInfo {
+  bool available = false;
+  std::string name;
+  std::string vendor;
+  int32_t min_delay_us = -1;
+  int32_t enable_result = -1;
+  int32_t set_rate_result = -1;
+};
+
+struct ImuInfo {
+  static constexpr int32_t kRequestedIntervalUs = 5000;
+
+  int32_t requested_interval_us = kRequestedIntervalUs;
+  ImuSensorInfo accelerometer;
+  ImuSensorInfo gyroscope;
 };
 
 // Accelerometer and gyroscope, read through the NDK sensor API.
@@ -57,12 +75,14 @@ class ImuSource {
   void Drain(std::vector<ImuSample>* out);
 
   bool is_running() const { return queue_ != nullptr; }
+  const ImuInfo& info() const { return info_; }
 
  private:
   ASensorManager* manager_ = nullptr;
   ASensorEventQueue* queue_ = nullptr;
   const ASensor* accelerometer_ = nullptr;
   const ASensor* gyroscope_ = nullptr;
+  ImuInfo info_;
 };
 
 }  // namespace sensor_logger

@@ -387,7 +387,8 @@ void ToggleRecording(AppState* state) {
 
   LocationData start_loc = GetLocationData(state->app);
   if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
-                            state->camera.info(), state->config, start_loc)) {
+                            state->camera.info(), state->config,
+                            state->imu.info(), start_loc)) {
     StartRecordingService(state->app);
     state->stop_reason = nullptr;
     // So the first thermal sample lands promptly rather than waiting out
