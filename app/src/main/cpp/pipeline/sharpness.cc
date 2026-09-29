@@ -3,8 +3,9 @@
 namespace sensor_logger {
 
 float LumaSharpness(const uint8_t* luma, int32_t width, int32_t height,
-                    int32_t stride, int32_t step) {
-  if (luma == nullptr || width <= 2 || height <= 2 || step <= 0) return 0.0f;
+                    int32_t stride, int32_t step, int32_t radius) {
+  if (luma == nullptr || step <= 0 || radius <= 0) return 0.0f;
+  if (width <= 2 * radius || height <= 2 * radius) return 0.0f;
 
   // Running sums in double: at capture resolutions the squared term overflows
   // float's precision well before the loop ends.
@@ -12,16 +13,17 @@ float LumaSharpness(const uint8_t* luma, int32_t width, int32_t height,
   double sum_squares = 0.0;
   int64_t count = 0;
 
-  // The border is skipped because the 4-neighbour kernel needs one pixel on
-  // every side.
-  for (int32_t y = step; y < height - step; y += step) {
+  // The border skipped is the neighbourhood radius, not the sampling step —
+  // the two used to be the same variable, which meant a coarser `step` also
+  // widened the Laplacian's neighbour distance.
+  for (int32_t y = radius; y < height - radius; y += step) {
     const uint8_t* row = luma + static_cast<int64_t>(y) * stride;
-    const uint8_t* above = row - static_cast<int64_t>(step) * stride;
-    const uint8_t* below = row + static_cast<int64_t>(step) * stride;
+    const uint8_t* above = row - static_cast<int64_t>(radius) * stride;
+    const uint8_t* below = row + static_cast<int64_t>(radius) * stride;
 
-    for (int32_t x = step; x < width - step; x += step) {
-      const int32_t laplacian = static_cast<int32_t>(row[x - step]) +
-                                row[x + step] + above[x] + below[x] -
+    for (int32_t x = radius; x < width - radius; x += step) {
+      const int32_t laplacian = static_cast<int32_t>(row[x - radius]) +
+                                row[x + radius] + above[x] + below[x] -
                                 4 * static_cast<int32_t>(row[x]);
 
       sum += laplacian;

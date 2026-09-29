@@ -20,6 +20,10 @@ android {
             cmake {
                 cppFlags += "-std=c++17"
                 arguments += "-DANDROID_STL=c++_shared"
+                // So a session's manifest can say which build produced it,
+                // without repeating the version gradle.properties already owns.
+                arguments += "-DAPP_VERSION_NAME=${property("VERSION_NAME")}"
+                arguments += "-DAPP_VERSION_CODE=${property("VERSION_CODE")}"
             }
         }
 

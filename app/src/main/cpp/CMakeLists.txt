@@ -19,9 +19,12 @@ add_library(sensor_logger SHARED
     native_app.cc
     camera/camera_source.cc
     camera/capture_config.cc
+    camera/fps_selection.cc
     pipeline/frame_motion.cc
+    pipeline/keyframe_selector.cc
     pipeline/pending_frame.cc
     pipeline/sharpness.cc
+    pipeline/timestamp_stats.cc
     ui/gl_quad.cc
     ui/preview_renderer.cc
     ui/ui_button.cc
@@ -33,6 +36,7 @@ add_library(sensor_logger SHARED
     input/input.cc
     platform/device_status.cc
     platform/location.cc
+    platform/periodic_schedule.cc
     platform/permissions.cc
     platform/recording_service.cc
 )
@@ -61,4 +65,18 @@ target_link_libraries(sensor_logger
     log
     EGL
     GLESv3
+)
+
+# Set by the Gradle build from gradle.properties (see app/build.gradle.kts) so
+# session.json can say which build produced a session. Defaulted here rather
+# than left undefined, so a CMake configure run outside Gradle still compiles.
+if(NOT DEFINED APP_VERSION_NAME)
+    set(APP_VERSION_NAME "unknown")
+endif()
+if(NOT DEFINED APP_VERSION_CODE)
+    set(APP_VERSION_CODE 0)
+endif()
+target_compile_definitions(sensor_logger PRIVATE
+    "APP_VERSION_NAME=\"${APP_VERSION_NAME}\""
+    "APP_VERSION_CODE=${APP_VERSION_CODE}"
 )

@@ -5,19 +5,6 @@
 #include <limits>
 
 namespace sensor_logger {
-namespace {
-
-// The picture is compared at this width. Small enough that a frame costs
-// microseconds and that sensor noise averages out, large enough that the offset
-// search still resolves a fraction of the frame worth caring about.
-constexpr int32_t kGridWidth = 64;
-
-// Offsets searched, in grid columns. Has to exceed the shift threshold, or the
-// search saturates before the threshold is ever crossed and the stretch never
-// ends.
-constexpr int32_t kSearchRadius = 10;
-
-}  // namespace
 
 void FrameMotion::Downsample(const CameraImageView& image,
                              std::vector<uint8_t>* out) {
@@ -40,16 +27,27 @@ void FrameMotion::Downsample(const CameraImageView& image,
   }
 }
 
-bool FrameMotion::Accept(const CameraImageView& image) {
-  if (!image.valid || image.planes[0].data == nullptr) return false;
+void FrameMotion::Measure(const CameraImageView& image) {
+  if (!image.valid || image.planes[0].data == nullptr) return;
 
   Downsample(image, &current_);
+  MeasureCurrentGrid();
+}
 
+void FrameMotion::MeasureGrid(const std::vector<uint8_t>& grid, int32_t grid_height) {
+  current_ = grid;
+  grid_height_ = grid_height;
+  MeasureCurrentGrid();
+}
+
+void FrameMotion::MeasureCurrentGrid() {
+  // Nothing to compare against yet: the only sensible reference for the first
+  // frame of a session (or after Reset()) is itself.
   if (reference_.size() != current_.size()) {
     reference_ = current_;
     last_shift_ = 0.0f;
     last_residual_ = 0.0f;
-    return true;
+    return;
   }
 
   // Best whole-pixel offset by sum of absolute differences over the part that
@@ -89,21 +87,42 @@ bool FrameMotion::Accept(const CameraImageView& image) {
   last_shift_ = std::sqrt(static_cast<float>(best_dx * best_dx + best_dy * best_dy)) /
                 static_cast<float>(kGridWidth);
   last_residual_ = best_error / 255.0f;
+}
 
-  if (last_shift_ < min_shift_ && last_residual_ < min_residual_) {
-    ++rejected_;
-    return false;
-  }
-
-  reference_ = current_;
-  return true;
+void FrameMotion::Commit(const std::vector<uint8_t>& grid, int32_t grid_height) {
+  reference_ = grid;
+  grid_height_ = grid_height;
+  last_shift_ = 0.0f;
+  last_residual_ = 0.0f;
 }
 
 void FrameMotion::Reset() {
   reference_.clear();
   last_shift_ = 0.0f;
   last_residual_ = 0.0f;
-  rejected_ = 0;
+}
+
+bool FrameMotion::IsValidShiftThreshold(float value) {
+  return value > 0.0f && value < kMaxShift;
+}
+
+bool FrameMotion::IsValidResidualThreshold(float value) {
+  return value > 0.0f && value < kMaxResidual;
+}
+
+bool FrameMotion::SetThresholds(float min_shift, float min_residual) {
+  bool ok = true;
+  if (IsValidShiftThreshold(min_shift)) {
+    min_shift_ = min_shift;
+  } else {
+    ok = false;
+  }
+  if (IsValidResidualThreshold(min_residual)) {
+    min_residual_ = min_residual;
+  } else {
+    ok = false;
+  }
+  return ok;
 }
 
 }  // namespace sensor_logger

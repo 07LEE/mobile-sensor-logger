@@ -13,9 +13,11 @@
 #include "frame_motion.h"
 #include "frame_writer.h"
 #include "imu_source.h"
+#include "keyframe_selector.h"
 #include "location.h"
 #include "pending_frame.h"
 #include "session_item.h"
+#include "timestamp_stats.h"
 
 namespace sensor_logger {
 
@@ -65,6 +67,7 @@ class SessionRecorder {
   // Creates the session directory under `root` and opens the log files.
   bool Start(const std::string& root, int64_t start_timestamp_ns,
              const CameraInfo& camera, const CaptureConfig& config,
+             const ImuInfo& imu,
              const LocationData& start_location = LocationData());
 
   // Offers a frame. Scored and buffered; written only if it ends up the
@@ -142,8 +145,29 @@ class SessionRecorder {
   float last_residual() const { return motion_.last_residual(); }
 
  private:
+  // A candidate frame competing to be the next keyframe: the sharpest seen so
+  // far, plus the FrameMotion grid it was measured against at the time it took
+  // the lead. The grid is a few KB, cheap to carry alongside a candidate that
+  // might not win — unlike its raw image, which PendingFrame already holds at
+  // the cost of one buffer. See ADR 14 for why two of these exist below.
+  struct Candidate {
+    PendingFrame frame;
+    std::vector<uint8_t> grid;
+    int32_t grid_height = 0;
+
+    bool valid() const { return frame.valid(); }
+    void Clear() {
+      frame.Clear();
+      grid.clear();
+      grid_height = 0;
+    }
+  };
+
   void WriteCandidate(int64_t timestamp_ns, float sharpness);
-  void FlushPending();
+  void WriteMotionGridRecord(int64_t timestamp_ns);
+  void FlushPendingFrame(PendingFrame& frame);
+  void SetCandidate(Candidate* candidate, const FrameData& frame, float sharpness);
+  void ConfirmKeyframe(Candidate* winner, int64_t timestamp_ns);
 
   // Both run on the writer thread. Nothing else touches frames_,
   // written_frames_ or frames_without_image_ while it is running, which is what
@@ -163,13 +187,32 @@ class SessionRecorder {
   std::ofstream thermal_;
   std::ofstream lifecycle_;
 
+  // ADR 15's replay input. Opened in Start() like the other logs, but its
+  // header needs grid_height, which FrameMotion only knows after its first
+  // Measure() call — so it is written lazily, on the first record.
+  std::ofstream motion_grid_;
+  bool motion_grid_header_written_ = false;
+
   FrameMotion motion_;
+  KeyframeSelector selector_;
+
+  // Only used by Retention::kAll, where every frame is written immediately
+  // and there is no competition between candidates to track.
   PendingFrame pending_;
+
+  // The kSharpest path's two competing candidates — see the Candidate comment
+  // above and ADR 14. window_candidate_ can be empty even after the window has
+  // opened, if the very first frame past the last keyframe already crosses
+  // target; stationary_candidate_ never is, once any frame has arrived.
+  Candidate window_candidate_;
+  Candidate stationary_candidate_;
+
   FrameWriter writer_;
 
   int64_t start_timestamp_ns_ = 0;
   LocationData start_location_{};
   CameraInfo camera_{};
+  ImuInfo imu_info_{};
   Retention retention_ = Retention::kSharpest;
 
   // Carried through from CaptureConfig only for the manifest: what a session
@@ -186,6 +229,9 @@ class SessionRecorder {
   int64_t considered_frames_ = 0;
   int64_t camera_completed_captures_ = 0;
   int64_t imu_samples_ = 0;
+  TimestampStats camera_timing_;
+  TimestampStats accelerometer_timing_;
+  TimestampStats gyroscope_timing_;
 };
 
 }  // namespace sensor_logger

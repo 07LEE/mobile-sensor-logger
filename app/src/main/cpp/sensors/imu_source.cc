@@ -7,16 +7,13 @@ namespace {
 
 constexpr char kTag[] = "sensor_logger";
 
-// 200Hz. Fast enough to integrate between camera frames without the volume
-// mattering: a sample is a few dozen bytes against megabytes for an image.
-constexpr int32_t kSampleIntervalUs = 5000;
-
 }  // namespace
 
 ImuSource::~ImuSource() { Stop(); }
 
 bool ImuSource::Start(ALooper* looper, const char* package_name) {
   if (queue_ != nullptr) return true;
+  info_ = ImuInfo{};
 
   manager_ = ASensorManager_getInstanceForPackage(package_name);
   if (manager_ == nullptr) {
@@ -34,28 +31,65 @@ bool ImuSource::Start(ALooper* looper, const char* package_name) {
     return false;
   }
 
+  auto describe = [](const ASensor* sensor, ImuSensorInfo* info) {
+    if (sensor == nullptr) return;
+    info->available = true;
+    const char* name = ASensor_getName(sensor);
+    const char* vendor = ASensor_getVendor(sensor);
+    info->name = name != nullptr ? name : "";
+    info->vendor = vendor != nullptr ? vendor : "";
+    info->min_delay_us = ASensor_getMinDelay(sensor);
+  };
+  describe(accelerometer_, &info_.accelerometer);
+  describe(gyroscope_, &info_.gyroscope);
+
   queue_ = ASensorManager_createEventQueue(manager_, looper, kLooperIdent, nullptr,
                                            nullptr);
   if (queue_ == nullptr) return false;
 
-  for (const ASensor* sensor : {accelerometer_, gyroscope_}) {
-    if (sensor == nullptr) continue;
-    ASensorEventQueue_enableSensor(queue_, sensor);
+  auto configure = [this](const ASensor* sensor, ImuSensorInfo* info) {
+    if (sensor == nullptr) return;
+    info->enable_result = ASensorEventQueue_enableSensor(queue_, sensor);
+    if (info->enable_result != 0) return;
     // The rate is a request; the platform may deliver slower. Timestamps are
     // what the data is read by, so an approximate rate is not a problem.
-    ASensorEventQueue_setEventRate(queue_, sensor, kSampleIntervalUs);
+    info->set_rate_result = ASensorEventQueue_setEventRate(
+        queue_, sensor, info_.requested_interval_us);
+  };
+  configure(accelerometer_, &info_.accelerometer);
+  configure(gyroscope_, &info_.gyroscope);
+
+  const bool any_enabled =
+      info_.accelerometer.enable_result == 0 ||
+      info_.gyroscope.enable_result == 0;
+  if (!any_enabled) {
+    __android_log_print(ANDROID_LOG_ERROR, kTag,
+                        "could not enable either IMU sensor");
+    ASensorManager_destroyEventQueue(manager_, queue_);
+    queue_ = nullptr;
+    return false;
   }
 
-  __android_log_print(ANDROID_LOG_INFO, kTag, "IMU started (accel=%d gyro=%d)",
-                      accelerometer_ != nullptr, gyroscope_ != nullptr);
+  __android_log_print(
+      ANDROID_LOG_INFO, kTag,
+      "IMU started (requested=%dus accel=%s enable=%d rate=%d "
+      "gyro=%s enable=%d rate=%d)",
+      info_.requested_interval_us,
+      info_.accelerometer.available ? info_.accelerometer.name.c_str() : "none",
+      info_.accelerometer.enable_result, info_.accelerometer.set_rate_result,
+      info_.gyroscope.available ? info_.gyroscope.name.c_str() : "none",
+      info_.gyroscope.enable_result, info_.gyroscope.set_rate_result);
   return true;
 }
 
 void ImuSource::Stop() {
   if (queue_ == nullptr) return;
 
-  for (const ASensor* sensor : {accelerometer_, gyroscope_}) {
-    if (sensor != nullptr) ASensorEventQueue_disableSensor(queue_, sensor);
+  if (accelerometer_ != nullptr && info_.accelerometer.enable_result == 0) {
+    ASensorEventQueue_disableSensor(queue_, accelerometer_);
+  }
+  if (gyroscope_ != nullptr && info_.gyroscope.enable_result == 0) {
+    ASensorEventQueue_disableSensor(queue_, gyroscope_);
   }
 
   if (manager_ != nullptr) {

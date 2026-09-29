@@ -40,6 +40,17 @@ struct CameraInfo {
   int32_t min_sensitivity = 0;
   int32_t max_sensitivity = 0;
 
+  // Requested, validated and applied frame-rate state. A zero request or
+  // applied value means auto. A fixed request is applied only when Camera2
+  // advertises the exact fixed AE range and this output size is fast enough.
+  int32_t requested_fps = 0;
+  int32_t applied_fps = 0;
+  int32_t max_output_fps = 0;
+  int64_t min_frame_duration_ns = 0;
+  bool fps_request_supported = true;
+  bool fixed_fps_range_available = false;
+  int32_t fps_set_result = -1;
+
   // The calibration the manufacturer measured for this lens, if the device
   // publishes it. Solving for intrinsics from the images alone needs wide
   // coverage and a lot of frames; being handed them is worth a great deal when

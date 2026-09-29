@@ -69,6 +69,13 @@ struct CaptureConfig {
   float min_shift = 0.12f;
   float min_residual = 0.06f;
 
+  // Set by Load() when the file's value fell outside what FrameMotion can
+  // actually measure and was left at whatever it was before the file was
+  // read. Surfaced in the HUD so a capture.conf typo does not silently vanish
+  // into logcat.
+  bool shift_rejected = false;
+  bool residual_rejected = false;
+
   // The longest exposure allowed once the camera is locked, in nanoseconds, or
   // 0 to take whatever the scene metered to.
   //
