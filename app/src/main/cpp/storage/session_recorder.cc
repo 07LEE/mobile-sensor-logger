@@ -262,10 +262,11 @@ void SessionRecorder::Record(const FrameData& frame) {
 
   if (!had_reference) {
     // The first frame of the session: nothing to measure it against yet, so it
-    // becomes the baseline both candidates start from — not a keyframe in its
-    // own right until a later frame confirms or supersedes it.
+    // becomes the stationary baseline — not a keyframe in its own right until
+    // a later frame confirms or supersedes it. The window candidate remains
+    // empty until motion approaches its target, avoiding a redundant full-size
+    // copy of this same first frame.
     selector_.Confirmed(frame.timestamp_ns);
-    SetCandidate(&window_candidate_, frame, sharpness);
     SetCandidate(&stationary_candidate_, frame, sharpness);
     return;
   }
