@@ -2,7 +2,7 @@
 
 Android app that records camera photos and motion sensor data for building 3D models on a computer.
 
-- Takes full-resolution photos — 4080x3060 on a Galaxy S25 Ultra
+- Takes photos at the selected camera's largest CPU-readable YUV resolution
 - Keeps the sharpest photo of each stretch of movement, not every frame
 - Records the accelerometer and gyroscope on the same clock as the photos
 
@@ -53,7 +53,7 @@ BATT 78% 32.1C              shown whether or not anything is recording
 | [docs/output-format.md](docs/output-format.md) | what a session leaves on disk, and how to read it |
 | [docs/settings.md](docs/settings.md) | the advanced settings, and what each choice costs |
 | [docs/devices.md](docs/devices.md) | hardware profiles and parameters for tested devices |
-| [docs/calibration-guide.md](docs/calibration-guide.md) | what to do when a device doesn't publish camera calibration |
+| [docs/calibration-guide.md](docs/calibration-guide.md) | when to trust Camera2 calibration and when to calibrate a camera or camera-IMU pair yourself |
 
 ## License
 
