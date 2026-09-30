@@ -1043,7 +1043,14 @@ extern "C" void android_main(android_app* app) {
       }
     }
 
-    if (state.display == EGL_NO_DISPLAY) continue;
+    if (state.display == EGL_NO_DISPLAY) {
+      // The repeating request still targets the preview reader while an
+      // active recording keeps the camera alive without a window. Consume
+      // that output anyway: leaving its fixed buffer queue full can stall the
+      // capture output on devices that synchronize their camera streams.
+      state.camera.DrainPreview();
+      continue;
+    }
 
     if (state.preview_visible) {
       if (state.camera.AcquirePreviewFrame(&preview_image)) {
