@@ -10,7 +10,7 @@ How to decide whether Android's camera calibration is sufficient, when to calibr
 | Camera-IMU reconstruction | Camera intrinsics and distortion, camera-to-IMU rotation and translation, and camera/IMU time offset | Camera2 intrinsics are still useful, but they do not normally replace a Kalibr camera-IMU calibration. Use an AprilGrid capture that excites all axes. |
 | Multiple physical cameras | Intrinsics and distortion per lens, plus transforms between lenses if they are used together | Never reuse one lens's values for another. Check `camera_id` and `physical_id` before combining frames. |
 
-The app should not maintain a guessed per-device fallback table. A missing calibration is visible and fixable; a plausible but incorrect fallback can silently produce incorrect geometry.
+Do not substitute a guessed per-device fallback when calibration is missing. A missing calibration is visible and fixable; a plausible but incorrect fallback can silently produce incorrect geometry.
 
 ## What Android can provide
 
@@ -70,7 +70,7 @@ Do not patch a shared device value directly into every session unless the lens, 
 
 Visual-inertial reconstruction additionally needs the rigid transform between the camera and IMU plus their time offset. Camera intrinsics describe rays inside one camera; they contain neither of those quantities.
 
-Use the project's AprilGrid target with Kalibr for the final camera-IMU calibration. A plain checkerboard remains useful for intrinsics, but its rotational symmetry can reverse corner ordering between views and has already produced an unusable camera-IMU solve in this project. AprilGrid tags carry unique IDs, removing that ambiguity.
+Use an AprilGrid target with Kalibr for the final camera-IMU calibration. A plain checkerboard remains useful for intrinsics, but its rotational symmetry can reverse corner ordering between views and invalidate a camera-IMU solve. AprilGrid tags carry unique IDs, removing that ambiguity.
 
 During the AprilGrid capture, keep the target stationary and visible while moving the phone through rotations and translations that excite all six IMU axes. Use `retention=all`; sampling only the sharpest keyframes removes the dense camera timing that camera-IMU calibration needs.
 
@@ -87,5 +87,3 @@ During the AprilGrid capture, keep the target stationary and visible while movin
 
 - [output-format.md](output-format.md#calibration) — calibration fields written in each session
 - [devices.md](devices.md) — parameters measured on tested devices
-- [ADR 11](adr/0011-pro-panel-extrinsic-capture-button.md) — camera-IMU capture workflow and the checkerboard failure
-- [ADR 12](adr/0012-remove-on-device-apriltag-detection.md) — AprilGrid remains the workstation target even though on-device tag detection was removed

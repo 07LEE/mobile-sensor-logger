@@ -94,11 +94,9 @@ class SessionRecorder {
                      float battery_temp_c);
 
   // Foreground/background transitions (APP_CMD_PAUSE / APP_CMD_RESUME).
-  // Backgrounding relies on the Foreground Service to keep the camera alive
-  // (ADR 7); if that ever silently fails, the OS's own background camera
-  // restriction is a plausible cause of a capture.csv gap that has nothing to
-  // do with buffers or heat. Recorded so that question never again depends on
-  // remembering whether the app was backgrounded partway through a take.
+  // Backgrounding relies on the Foreground Service and on draining every
+  // configured camera output. Recorded so a capture.csv gap can be compared
+  // with lifecycle state instead of relying on memory of the take.
   void RecordLifecycleEvent(int64_t timestamp_ns, const char* event);
 
   // Writes any buffered frame, then closes the session.
@@ -149,7 +147,8 @@ class SessionRecorder {
   // far, plus the FrameMotion grid it was measured against at the time it took
   // the lead. The grid is a few KB, cheap to carry alongside a candidate that
   // might not win — unlike its raw image, which PendingFrame already holds at
-  // the cost of one buffer. See ADR 14 for why two of these exist below.
+  // the cost of one buffer. Separate window and stationary candidates keep the
+  // spacing-driven and elapsed-time confirmation paths independent.
   struct Candidate {
     PendingFrame frame;
     std::vector<uint8_t> grid;
@@ -187,9 +186,9 @@ class SessionRecorder {
   std::ofstream thermal_;
   std::ofstream lifecycle_;
 
-  // ADR 15's replay input. Opened in Start() like the other logs, but its
-  // header needs grid_height, which FrameMotion only knows after its first
-  // Measure() call — so it is written lazily, on the first record.
+  // Offline replay input. Opened in Start() like the other logs, but its header
+  // needs grid_height, which FrameMotion only knows after its first Measure()
+  // call — so it is written lazily, on the first record.
   std::ofstream motion_grid_;
   bool motion_grid_header_written_ = false;
 
@@ -200,10 +199,10 @@ class SessionRecorder {
   // and there is no competition between candidates to track.
   PendingFrame pending_;
 
-  // The kSharpest path's two competing candidates — see the Candidate comment
-  // above and ADR 14. window_candidate_ can be empty even after the window has
-  // opened, if the very first frame past the last keyframe already crosses
-  // target; stationary_candidate_ never is, once any frame has arrived.
+  // The kSharpest path's two competing candidates. window_candidate_ can be
+  // empty even after the window has opened, if the very first frame past the
+  // last keyframe already crosses target; stationary_candidate_ never is,
+  // once any frame has arrived.
   Candidate window_candidate_;
   Candidate stationary_candidate_;
 

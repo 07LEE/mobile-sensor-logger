@@ -62,8 +62,8 @@ class FrameMotion {
   void Measure(const CameraImageView& image);
 
   // Same comparison as Measure(), for a caller that already has a downsampled
-  // grid instead of a raw image — a replay tool reading ADR 15's
-  // motion_grid.bin, which never has (or needs) the original frame.
+  // grid instead of a raw image — the replay tool reads motion_grid.bin and
+  // never has (or needs) the original frame.
   void MeasureGrid(const std::vector<uint8_t>& grid, int32_t grid_height);
 
   // False only before the first Measure() call in a session (or since Reset()).

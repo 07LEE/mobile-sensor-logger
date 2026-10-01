@@ -30,8 +30,7 @@ namespace sensor_logger {
 // EXTRINSIC, below that, is not a cyclable value either — it's an action,
 // like RESET below it: tapping it starts a camera-IMU extrinsic capture
 // take immediately (retention forced to `all` for that recording only)
-// rather than changing something and staying open. See
-// docs/adr/0011-pro-panel-extrinsic-capture-button.md.
+// rather than changing something and staying open.
 class ProPanel {
  public:
   ProPanel() = default;

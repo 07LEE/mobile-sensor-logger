@@ -1,6 +1,6 @@
 // Replays a session's keyframe selection offline from motion_grid.bin and
 // candidates.csv, under thresholds that may differ from the ones the session
-// actually recorded with. See ADR 15.
+// actually recorded with.
 //
 // Links the same frame_motion.cc / keyframe_selector.cc production code
 // SessionRecorder does — this is not a reimplementation of the selection
@@ -38,8 +38,8 @@ struct ReplayFrame {
 };
 
 // candidates.csv: timestamp_ns,sharpness,shift,residual — only the first two
-// columns matter here; shift/residual are specific to the thresholds that
-// session actually ran with (see ADR 15) and are recomputed below instead.
+// columns matter here; shift/residual are specific to the reference chain the
+// session actually ran with and are recomputed below instead.
 bool ReadSharpness(const std::string& path,
                    std::unordered_map<int64_t, float>* out, std::string* error) {
   std::ifstream file(path);

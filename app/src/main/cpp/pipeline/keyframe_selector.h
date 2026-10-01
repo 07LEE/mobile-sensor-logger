@@ -7,7 +7,7 @@ namespace sensor_logger {
 
 // Decides when a stretch of movement ends, from the numbers FrameMotion
 // already measures each frame — no image data, so this runs (and is tested)
-// without a camera. See ADR 14.
+// without a camera.
 //
 // Picking the sharpest frame of an entire stretch against a fixed reference
 // let a keyframe land anywhere from right beside the last one to well past

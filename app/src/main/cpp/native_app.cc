@@ -90,9 +90,9 @@ struct AppState {
   // so a stalled camera or a different FPS does not change their meaning.
   // Polled whether or not anything is recording — battery
   // percent is shown on the HUD all the time — but only written to
-  // thermal.csv while recording, where the point (see ADR 9) is lining a
-  // throttling event up against a capture.csv gap a couple of seconds wide,
-  // not catching the exact frame it started on.
+  // thermal.csv while recording, where the point is lining a throttling event
+  // up against a capture.csv gap a couple of seconds wide, not catching the
+  // exact frame it started on.
   PeriodicSchedule thermal_schedule{
       sensor_logger::kDeviceStatusSampleIntervalNs};
   ThermalSample last_thermal;
@@ -138,11 +138,10 @@ struct AppState {
   // and delete the wrong one.
   std::vector<sensor_logger::SessionItem> cached_sessions;
 
-  // Set by the PRO panel's EXTRINSIC action — see
-  // docs/adr/0011-pro-panel-extrinsic-capture-button.md. `extrinsic_prev_retention`
-  // is what `config.retention` gets put back to when the recording it started
-  // stops; unlike the RETENTION toolbar button, this never reaches
-  // capture.conf, so the file reads the same after the take as before it.
+  // Set by the PRO panel's EXTRINSIC action. `extrinsic_prev_retention` is what
+  // `config.retention` gets put back to when the recording it started stops;
+  // unlike the RETENTION toolbar button, this never reaches capture.conf, so
+  // the file reads the same after the take as before it.
   bool extrinsic_mode_active = false;
   Retention extrinsic_prev_retention = Retention::kSharpest;
 };
@@ -404,8 +403,7 @@ void ToggleRecording(AppState* state) {
 // Starts a camera-IMU extrinsic capture take: forces retention to `all` in
 // memory only (RevertExtrinsicModeIfActive above puts it back, and neither
 // side of that touches capture.conf), closes the PRO panel, and starts
-// recording immediately — the same as pressing volume-down. See
-// docs/adr/0011-pro-panel-extrinsic-capture-button.md.
+// recording immediately — the same as pressing volume-down.
 void StartExtrinsicCapture(AppState* state) {
   if (state->recorder.is_recording()) return;
 

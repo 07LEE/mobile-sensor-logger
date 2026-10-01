@@ -21,7 +21,7 @@ fps       = auto | 30           # pins the frame rate instead of letting AE pick
 adb push capture.conf /sdcard/Android/data/com.sensor.logger/files/
 ```
 
-`shutter`, `fps`, `mains`, `shift` and `residual` can also be changed from the phone itself, in the PRO panel (see the [README](../README.md)) — a tap cycles a row through a fixed list of values the same way retention and lens already do, and the change is written back to this same file, so it is picked up on the next recording without leaving the app. `shift` and `residual` are continuous in the file (any value between 0 and 0.5) but step through presets either side of the default on the panel — a coarser control than the file allows, in exchange for fitting the same tap-to-cycle pattern as the rest of the row. `capture`, `retention` and `lens` remain file-only: the latter two already have their own toolbar buttons, and `capture` is not something worth changing between takes.
+`shutter`, `fps`, `mains`, `shift` and `residual` can also be changed in the PRO panel, and each change is written back to this file for the next recording. `shift` accepts values greater than `0` and below `0.15625`; `residual` accepts values greater than `0` and below `1.0`. The panel offers a smaller preset list around the defaults. `capture` is file-only. Retention has its own toolbar button and is saved to the file; Lens has its own toolbar button but a lens selected there applies only until the app restarts unless `capture.conf` is also updated.
 
 Every rear camera is logged at startup with its focal length, so `lens` can name one by id. On a Galaxy S25 Ultra two are offered: `0` at 6.3mm and `2` at 2.2mm.
 
@@ -31,9 +31,17 @@ The default is `ultrawide`, the shortest focal length the device offers. It wins
 
 A requested size is used only if the chosen camera offers it exactly; otherwise it takes the largest and says so in the log.
 
+## PRO panel actions
+
+`INTRINSIC: OK` means the selected camera published Camera2 intrinsic calibration; `INTRINSIC: NONE` means it did not. This row reports availability and cannot be tapped.
+
+`EXTRINSIC CAPTURE` closes the panel and starts a recording immediately with `retention=all` for that recording only. It is intended for a dense camera-IMU calibration take; stopping the recording restores the previous retention setting.
+
+`RESET` restores the PRO values to `shutter=auto`, `fps=auto`, `mains=60`, `shift=0.12` and `residual=0.06`, then saves them to `capture.conf`.
+
 ## Which frames are kept
 
-Every frame is scored for sharpness — variance of the Laplacian over the luma plane, subsampled — and the sharpest frame of each stretch of movement is written. The score is in candidates.csv and frames.csv. It has no absolute meaning: it moves with scene content and exposure, so it only compares frames of the same scene taken moments apart.
+With `retention=sharpest`, every frame is scored for sharpness — variance of the Laplacian over the luma plane, subsampled — and only selected keyframes are submitted to the writer. With `retention=all`, every acquired frame is submitted. A full writer queue can still drop a submitted frame. The sharpness score is recorded in candidates.csv and frames.csv; it has no absolute meaning and should only compare nearby frames of the same scene.
 
 A stretch ends when the picture has changed enough, measured against the last frame kept:
 
@@ -42,16 +50,15 @@ A stretch ends when the picture has changed enough, measured against the last fr
 | `shift` | Best alignment offset, as a fraction of frame width | `0.12` |
 | `residual` | Mean difference remaining at that offset, `0`–`1` | `0.06` |
 
-Either one crossing its threshold ends the stretch. `shift` catches panning and sideways movement; `residual` catches walking forward and rotating about the lens axis, which barely move the offset.
+`shift` catches panning and sideways movement; `residual` catches walking forward and rotating about the lens axis, which barely move the offset. Reaching 85% of either target opens a candidate window. Once either target is crossed, the app keeps comparing nearby candidates for 200ms and confirms the sharpest one in that window. If neither target is crossed for five seconds, the sharpest stationary candidate is confirmed instead.
 
-Both are settings (see below); the sharpness subsampling step is in session_recorder.cc. Neither has been tuned against a reconstruction.
+Both thresholds are settings. Neither has been tuned against a reconstruction.
 
-Halving the thresholds roughly doubles the frames kept, and they only bite while the camera moves slowly enough for them to — sweep fast enough and every frame crosses them, at which point the capture is keeping everything and the frame rate is the only limit left.
+Lower thresholds generally keep frames more densely, but the relationship is scene- and motion-dependent. Fast motion does not make `retention=sharpest` keep every frame: the post-crossing candidate window still bounds each selection decision.
 
-The defaults leave about 88% of the picture shared between consecutive kept frames, which is generous next to the 70 to 80% reconstruction usually asks for.
-They sit there because at full resolution the free space is the budget: 105GB holds roughly 5,500 frames, which these values spend in forty minutes and half these values spend in six. The `ROOM FOR` line on screen is what says whether a capture is spending it faster than intended.
+The thresholds do not guarantee a fixed overlap between consecutive keyframes. Scene depth, rotation, residual noise and the sharpness winner inside the candidate window all affect the final spacing. At full resolution, use the `MIN LEFT` estimate on screen to judge the current session's measured storage rate instead of relying on a fixed frame count.
 
-Every frame scored is logged whether or not its image was kept, so what a different threshold would have selected can be worked out from a capture already taken — see [candidates.csv](output-format.md#files).
+Every scored frame is logged in `candidates.csv`, and its downsampled luma grid is stored in `motion_grid.bin`. Together they let `./scripts/replay_sampling.sh` rerun the production selection rule with different thresholds; `candidates.csv` alone cannot reproduce a new reference chain. See [output-format.md](output-format.md#replaying-the-selection-rule).
 
 ## Pinning the frame rate
 
@@ -68,6 +75,6 @@ A frame at full resolution is around 19MB, and a session writes two or three a s
 
 `dropped_frames` in session.json counts frames the writer's queue could not keep up with. It should be zero. A run of drops means the capture is asking for more than the device can write.
 
-`frames_lost_upstream` counts a different kind of loss that `dropped_frames` cannot see: frames the camera finished (counted in `camera_completed_captures`) that `AcquireFrame` never handed to `Record` because a newer image had already superseded them in the reader's buffer — which happens once the capture loop falls behind for long enough, `retention = all` being the mode most likely to. Both should be zero on a capture that kept up.
+`frames_lost_upstream` is currently calculated as `camera_completed_captures - considered_frames`. A positive value can indicate images superseded in the reader before `Record` saw them, but it can also include capture-result/image asymmetry at the recording boundary. Treat it as a signal to inspect the timestamps rather than as an exact loss count until that boundary accounting is separated.
 
 Recording stops on its own with 2GB left, and the readout says `STOPPED - DISK FULL`. That margin exists because a session that runs the disk to the last byte cannot write its own manifest — the settings, the counts and the calibration go with it — so a capture that filled a phone ends up unusable anyway. Sessions are never deleted; clearing them is a manual job.

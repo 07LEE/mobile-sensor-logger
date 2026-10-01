@@ -44,9 +44,9 @@ public class RecordingService extends Service {
         }
 
         // Not START_STICKY: native code is what decides whether this service
-        // should be running (see ADR 0007), so Android restarting it on its own
-        // after a kill would only recreate the notification with no capture
-        // engine behind it.
+        // should be running, so Android restarting it on its own after a kill
+        // would only recreate the notification with no capture engine behind
+        // it.
         return START_NOT_STICKY;
     }
 
