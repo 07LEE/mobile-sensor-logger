@@ -172,7 +172,7 @@ void RequireNear(float actual, float expected, float tolerance,
   }
 }
 
-// --- FrameMotion: measurement only, see ADR 14 -----------------------------
+// --- FrameMotion: measurement only ------------------------------------------
 
 void TestFirstFrameEstablishesReference() {
   const TestImage image = TestImage::Pattern();
@@ -412,7 +412,7 @@ void TestSharpnessIgnoresRowStridePadding() {
               "a row stride wider than the image width should not change the score");
 }
 
-// --- KeyframeSelector: spacing decision only, see ADR 14 --------------------
+// --- KeyframeSelector: spacing decision only --------------------------------
 
 constexpr float kSelectorTargetShift = 0.12f;
 constexpr float kSelectorTargetResidual = 0.06f;
@@ -442,7 +442,7 @@ void TestSelectorConfirmsWindowAfterPostCrossingDelay() {
                    kSelectorTargetResidual);
   Require(selector.InWindow(), "the crossing frame itself is still inside its own window");
   Require(selector.ShouldConfirm() == KeyframeSelector::ConfirmReason::kNone,
-          "crossing should not confirm immediately — see ADR 14");
+          "crossing should not confirm before the candidate window closes");
 
   const int64_t at_edge = crossed_at + KeyframeSelector::kPostCrossingWindowNs;
   selector.Observe(at_edge, kSelectorTargetShift, 0.0f, kSelectorTargetShift,
@@ -526,8 +526,8 @@ void TestSelectorResetClearsState() {
 }
 
 // --- motion_grid.bin format: writer/reader roundtrip and corruption --------
-// See ADR 15. There is no on-device writer to test on the host (SessionRecorder
-// needs Android), so these write the format by hand the way it does.
+// There is no on-device writer to test on the host (SessionRecorder needs
+// Android), so these write the format by hand the way it does.
 
 class ScratchFile {
  public:

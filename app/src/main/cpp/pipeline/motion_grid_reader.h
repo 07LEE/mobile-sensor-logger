@@ -9,7 +9,7 @@
 
 namespace sensor_logger {
 
-// One record of a motion_grid.bin file (see ADR 15), decoded.
+// One decoded record from a motion_grid.bin file.
 struct GridFrame {
   int64_t timestamp_ns = 0;
   std::vector<uint8_t> grid;

@@ -19,11 +19,11 @@ Hardware parameters and test results for devices tested with Mobile Sensor Logge
 | Timestamp source | `REALTIME` | `REALTIME` |
 | Max fps at capture size | 30 | not measured |
 
-Every one of those is read from the device rather than assumed, which is what the second one was needed to establish. The rolling shutter skew is the pair worth looking at: nearly four times longer on the Flip4 and about as long as the gap between frames, so the same movement skews its frames far more.
+These values are read from each device rather than assumed. The rolling shutter skew is nearly four times longer on the Flip4 and about as long as the gap between frames, so the same movement skews its frames far more.
 
-Both are Samsung and both report semi-planar chroma, so the planar path has never run.
+Both tested devices report semi-planar VU chroma. Planar output remains unverified on real hardware.
 
 The max fps is `android.scaler.availableMinFrameDurations` for the capture size's `YUV_420_888` entry, on the Galaxy S25 Ultra exactly 33,333,333ns — 1/30 — a hardware ceiling rather than anything `fps` in capture.conf can raise. Left at `auto`, the platform's own choice has been measured landing below this ceiling in a dim room (24fps at ISO1359, against 30fps in a bright one at the same location) rather than always sitting at it — see [settings.md](settings.md#pinning-the-frame-rate).
 
 The same characteristics dump shows the capture size is also available as `BLOB` (format `33`, JPEG's HAL-level carrier) on the Galaxy S25 Ultra — the camera can produce a hardware-encoded JPEG at this resolution directly.
-The current raw-frame decision compared video against independent raw frames rather than this path; a JPEG stream remains a distinct storage-format option that requires its own quality and throughput evaluation.
+The app does not currently request that stream; recorded frames remain raw `YUV_420_888`.

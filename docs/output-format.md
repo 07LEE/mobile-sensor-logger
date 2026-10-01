@@ -1,6 +1,6 @@
 # Output format
 
-What a capture session leaves on disk, and what is needed to read it. For the app itself — controls, settings, building — see the [README](../README.md).
+What a capture session leaves on disk, and what is needed to read it. For installation and controls, see the [README](../README.md).
 
 ## Files
 
@@ -24,7 +24,9 @@ adb pull /sdcard/Android/data/com.sensor.logger/files/sessions data/
 | lifecycle.csv | `timestamp_ns, event` — `event` is `background` or `foreground`, written on each transition while recording |
 | session.json | Which phone and camera it came from, counts, and units |
 
-Timestamps are nanoseconds, taken from the image rather than read on arrival, and they are the key joining every file. candidates.csv joins to frames.csv on `timestamp_ns`; rows in both are the frames that were kept. candidates.csv and motion_grid.bin join the same way, one row per record, in the same order.
+Timestamps are nanoseconds, but their producer depends on the file. `frames.csv`, `candidates.csv` and `motion_grid.bin` use camera image timestamps; `capture.csv` uses camera capture-result timestamps; `imu.csv` uses sensor-event timestamps; `thermal.csv` uses the `CLOCK_BOOTTIME` query time; and `lifecycle.csv` records the most recent camera timestamp at each transition. Camera and IMU timestamps are directly comparable only when the camera reports a `REALTIME` timestamp source, which the manifest explains in `imu_note`.
+
+Every `frames.csv` timestamp has a matching row in `candidates.csv`, but most candidate rows do not have an image because only selected keyframes are written. `candidates.csv` and `motion_grid.bin` are one-to-one and ordered by timestamp.
 
 ### Reading the images
 
@@ -47,9 +49,9 @@ session.json opens with `app_version_name` and `app_version_code`, then `device`
 
 It also carries `camera_id`, `focal_length_mm`, `aperture` and `sensor_size_mm`. Frames from different lenses cannot be solved as one camera — an ultra-wide and a periscope disagree about focal length by a factor of eight — so this is what says which one a session is.
 
-It also carries what capture.conf the session actually ran with — `retention`, `min_shift`, `min_residual`, `shutter`, `mains_hz`, `fps` — next to what was measured — `written_frames`, `considered_frames`, `dropped_frames`, `camera_completed_captures`, `frames_lost_upstream`, `average_fps` — so a setting and its effect can be told apart later instead of assumed. See [settings.md](settings.md#running-out-of-room) for what the count fields mean and which should be zero.
+It also carries what capture.conf the session actually ran with — `retention`, `min_shift`, `min_residual`, `shutter`, `mains_hz`, `fps` — next to what was measured — `written_frames`, `considered_frames`, `dropped_frames`, `camera_completed_captures`, `frames_lost_upstream`, `average_fps` — so a setting and its effect can be told apart later instead of assumed. See [settings.md](settings.md#running-out-of-room) for the count semantics and the current recording-boundary caveat.
 
-For frame rate, `camera_fps_requested` is the numeric form of the configured `fps` (`0` means auto), while `camera_fps_applied` is the fixed rate actually placed in the capture request (`0` means the request remained auto). `camera_fps_request_supported` is true only when the camera advertises the exact fixed AE range and the chosen YUV output's `camera_min_frame_duration_ns` can sustain it; an unsupported request falls back to auto and is never reported as applied. `camera_fps_set_result` is the Camera2 result from applying a validated request, or `-1` when no fixed request was attempted. `camera_observed_fps`, the mean and approximate median period, maximum gap and non-monotonic timestamp count summarize capture-result timestamps delivered during the session. Per-frame `fps_range_min` and `fps_range_max` in capture.csv remain the platform's reported range.
+For frame rate, `camera_fps_requested` is the numeric form of the configured `fps` (`0` means auto), while `camera_fps_applied` is the fixed rate actually placed in the capture request (`0` means the request remained auto). `camera_fps_request_supported` is true only when the camera advertises the exact fixed AE range and the chosen YUV output's `camera_min_frame_duration_ns` can sustain it; an unsupported request falls back to auto and is never reported as applied. `camera_fps_set_result` is the Camera2 result from applying a validated request, or `-1` when no fixed request was attempted. `camera_observed_fps`, the mean and approximate median period, maximum gap and non-monotonic timestamp count summarize capture-result timestamps delivered during the session. Per-frame `fps_range_min` and `fps_range_max` in capture.csv are the active AE target range, not the measured interval between that frame and the next one.
 
 `thermal_sample_target_interval_ns` and `free_space_check_target_interval_ns` record the intended two-second schedules. They use `CLOCK_BOOTTIME`, so camera FPS, preview visibility and time spent suspended do not redefine the interval. A busy or suspended process can observe a late sample; missed intervals are skipped rather than emitted as a burst.
 
@@ -59,7 +61,7 @@ For frame rate, `camera_fps_requested` is the numeric form of the configured `fp
 
 candidates.csv records what the on-device run actually measured against the reference chain its own thresholds produced — sharpness (never threshold-dependent) alongside shift/residual (specific to that run). To ask what a different `min_shift`/`min_residual` would have kept, without reshooting, motion_grid.bin carries what those thresholds would need: the same downsampled luma grid `FrameMotion` computes internally for every scored frame, small enough (`grid_width * grid_height` bytes — 3072 at this project's usual 4:3 capture) to record unconditionally alongside candidates.csv.
 
-Format (defined by `pipeline/motion_grid_format.h`): a 16-byte header (`"SLMG"` magic, `format_version`, `grid_width`, `grid_height`), then one fixed-size record per scored frame (`timestamp_ns`, then `grid_width * grid_height` grid bytes, row-major, top-left origin). Little-endian only. Fixed record sizes mean a reader can tell a truncated file from a valid one by size alone.
+Format (defined by `app/src/main/cpp/pipeline/motion_grid_format.h`): a 16-byte header (`"SLMG"` magic, `format_version`, `grid_width`, `grid_height`), then one fixed-size record per scored frame (`timestamp_ns`, then `grid_width * grid_height` grid bytes, row-major, top-left origin). Little-endian only. Fixed record sizes mean a reader can tell a truncated file from a valid one by size alone.
 
 `./scripts/replay_sampling.sh <session_dir> [--min-shift=F] [--min-residual=F]` drives the same production `FrameMotion`/`KeyframeSelector` code the app does, and prints the keyframe timestamps that would result. Run with the session's own `min_shift`/`min_residual` (from session.json), its output is exactly frames.csv's `timestamp_ns` column.
 
@@ -100,7 +102,7 @@ capture.csv is how to check it held. On the tested device the lock takes 7 frame
 
 `rolling_shutter_skew_ns` is how long the sensor takes to read from its first row to its last — 8.6ms on the tested device. A rolling shutter skews a frame by whatever the camera moved during that, and correcting for it later needs the number. It is a property of the readout, not of the exposure, so a shorter exposure does not reduce it.
 
-`fps_range_min`/`fps_range_max` are what the platform actually ran the frame rate at for that frame — the default when `fps` in capture.conf is left at `auto`, since nothing else here asks for a rate. It is not necessarily constant across a session: the default is a range flexible enough for auto exposure to trade frame rate for a longer exposure in a dim room, so a scene that got darker partway through can show a lower rate for the rest of the session than it started at.
+`fps_range_min`/`fps_range_max` are the AE target range reported for that capture result. They can change when auto exposure selects a different operating range, but they are not a direct measurement of the delivered FPS. Use consecutive capture timestamps or the manifest's observed timing summary for the actual cadence.
 
 ### Capping the exposure
 

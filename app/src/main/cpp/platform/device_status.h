@@ -7,8 +7,8 @@ struct android_app;
 
 namespace sensor_logger {
 
-// Device thermal and battery state (see ADR 9 for the thermal half). All
-// three readings are Java-only; there is no NDK equivalent for PowerManager
+// Device thermal and battery state. All three readings are Java-only; there
+// is no NDK equivalent for PowerManager
 // or BatteryManager. Read fresh each call rather than cached, since the point
 // is watching them change — through a recording for the first two, and
 // continuously for battery_percent, which is shown on the HUD whether or not

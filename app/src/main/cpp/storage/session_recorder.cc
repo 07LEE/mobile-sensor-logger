@@ -275,8 +275,8 @@ void SessionRecorder::Record(const FrameData& frame) {
                     motion_.min_shift(), motion_.min_residual());
 
   // The window narrows which candidates can win the spacing-driven confirm
-  // below to ones close to where target was reached — see ADR 14 for why the
-  // sharpest frame of the whole stretch is not good enough on its own.
+  // below to ones close to where target was reached. The sharpest frame of the
+  // whole stretch can be too close to or too far from the previous keyframe.
   if (selector_.InWindow() &&
       (!window_candidate_.valid() ||
        sharpness > window_candidate_.frame.sharpness())) {

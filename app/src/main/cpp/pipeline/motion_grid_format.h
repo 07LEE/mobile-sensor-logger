@@ -5,8 +5,8 @@
 
 namespace sensor_logger {
 
-// On-disk format for a session's motion_grid.bin — see ADR 15. Written by
-// SessionRecorder, read by tools/replay_sampling. Little-endian only: every
+// On-disk format for a session's motion_grid.bin. Written by SessionRecorder,
+// read by tools/replay_sampling. Little-endian only: every
 // platform this ever runs on (ARM on the phone, x86-64 on the workstation that
 // replays it) is, so nothing here does byte-order conversion.
 //
