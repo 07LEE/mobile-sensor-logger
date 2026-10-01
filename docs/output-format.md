@@ -20,7 +20,7 @@ adb pull /sdcard/Android/data/com.sensor.logger/files/sessions data/
 | candidates.csv | `timestamp_ns, sharpness, shift, residual` — one row per frame scored, kept or not |
 | motion_grid.bin | Binary, one downsampled luma grid per scored frame — the offline replay input; see below |
 | capture.csv | `timestamp_ns, exposure_ns, sensitivity, focus_diopters, rolling_shutter_skew_ns, ae_state, awb_state, af_state, fps_range_min, fps_range_max, physical_id` — one row per frame the camera finished |
-| thermal.csv | `timestamp_ns, thermal_status, battery_temp_c` — sampled on a two-second `CLOCK_BOOTTIME` schedule, not per frame; `timestamp_ns` is the query time and `thermal_status` is `-1` below API 29 (see [ADR 9](adr/0009-log-thermal-status-and-battery-temperature.md)) |
+| thermal.csv | `timestamp_ns, thermal_status, battery_temp_c` — sampled on a two-second `CLOCK_BOOTTIME` schedule, not per frame; `timestamp_ns` is the query time and `thermal_status` is `-1` below API 29 |
 | lifecycle.csv | `timestamp_ns, event` — `event` is `background` or `foreground`, written on each transition while recording |
 | session.json | Which phone and camera it came from, counts, and units |
 
@@ -59,7 +59,7 @@ For frame rate, `camera_fps_requested` is the numeric form of the configured `fp
 
 candidates.csv records what the on-device run actually measured against the reference chain its own thresholds produced — sharpness (never threshold-dependent) alongside shift/residual (specific to that run). To ask what a different `min_shift`/`min_residual` would have kept, without reshooting, motion_grid.bin carries what those thresholds would need: the same downsampled luma grid `FrameMotion` computes internally for every scored frame, small enough (`grid_width * grid_height` bytes — 3072 at this project's usual 4:3 capture) to record unconditionally alongside candidates.csv.
 
-Format (see [ADR 15](adr/0015-record-motion-grids-for-offline-replay.md) and `pipeline/motion_grid_format.h`): a 16-byte header (`"SLMG"` magic, `format_version`, `grid_width`, `grid_height`), then one fixed-size record per scored frame (`timestamp_ns`, then `grid_width * grid_height` grid bytes, row-major, top-left origin). Little-endian only. Fixed record sizes mean a reader can tell a truncated file from a valid one by size alone.
+Format (defined by `pipeline/motion_grid_format.h`): a 16-byte header (`"SLMG"` magic, `format_version`, `grid_width`, `grid_height`), then one fixed-size record per scored frame (`timestamp_ns`, then `grid_width * grid_height` grid bytes, row-major, top-left origin). Little-endian only. Fixed record sizes mean a reader can tell a truncated file from a valid one by size alone.
 
 `./scripts/replay_sampling.sh <session_dir> [--min-shift=F] [--min-residual=F]` drives the same production `FrameMotion`/`KeyframeSelector` code the app does, and prints the keyframe timestamps that would result. Run with the session's own `min_shift`/`min_residual` (from session.json), its output is exactly frames.csv's `timestamp_ns` column.
 

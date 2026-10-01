@@ -87,5 +87,3 @@ During the AprilGrid capture, keep the target stationary and visible while movin
 
 - [output-format.md](output-format.md#calibration) — calibration fields written in each session
 - [devices.md](devices.md) — parameters measured on tested devices
-- [ADR 11](adr/0011-pro-panel-extrinsic-capture-button.md) — camera-IMU capture workflow and the checkerboard failure
-- [ADR 12](adr/0012-remove-on-device-apriltag-detection.md) — AprilGrid remains the workstation target even though on-device tag detection was removed
