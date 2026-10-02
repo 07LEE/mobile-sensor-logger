@@ -15,11 +15,14 @@
 #include "camera_source.h"
 #include "capture_config.h"
 #include "device_status.h"
+#include "frame_motion.h"
+#include "frame_stall_detector.h"
 #include "imu_source.h"
 #include "input.h"
 #include "location.h"
 #include "log.h"
 #include "permissions.h"
+#include "periodic_schedule.h"
 #include "preview_renderer.h"
 #include "recording_service.h"
 #include "session_recorder.h"
@@ -32,11 +35,13 @@ using sensor_logger::CaptureResult;
 using sensor_logger::CaptureConfig;
 using sensor_logger::Retention;
 using sensor_logger::FrameData;
+using sensor_logger::FrameMotion;
 using sensor_logger::ImuSample;
 using sensor_logger::Action;
 using sensor_logger::ImuSource;
 using sensor_logger::Input;
 using sensor_logger::PendingFrame;
+using sensor_logger::PeriodicSchedule;
 using sensor_logger::PreviewRenderer;
 using sensor_logger::SessionRecorder;
 using sensor_logger::SessionsOverlay;
@@ -77,16 +82,27 @@ struct AppState {
   // shared storage is a round trip through the filesystem daemon, and the
   // number moves slowly enough that a couple of seconds stale is honest.
   int64_t free_bytes = 0;
-  int free_space_countdown = 0;
+  PeriodicSchedule free_space_schedule{
+      sensor_logger::kFreeSpaceCheckIntervalNs};
   int64_t last_timestamp_ns = 0;
 
-  // Same cadence as free_space_countdown, for the same reason: cheap enough
-  // to poll often. Polled whether or not anything is recording — battery
+  // The camera can be throttled once the app is backgrounded even with the
+  // foreground service running, and that leaves no trace in the drop counters.
+  // The window is gone then, so the result is kept for the HUD to show on
+  // return.
+  bool in_background = false;
+  sensor_logger::FrameStallDetector frame_stall;
+
+  // Same cadence as the free-space schedule, for the same reason: cheap enough
+  // to poll often. Both schedules use CLOCK_BOOTTIME rather than camera frames,
+  // so a stalled camera or a different FPS does not change their meaning.
+  // Polled whether or not anything is recording — battery
   // percent is shown on the HUD all the time — but only written to
-  // thermal.csv while recording, where the point (see ADR 9) is lining a
-  // throttling event up against a capture.csv gap a couple of seconds wide,
-  // not catching the exact frame it started on.
-  int thermal_countdown = 0;
+  // thermal.csv while recording, where the point is lining a throttling event
+  // up against a capture.csv gap a couple of seconds wide, not catching the
+  // exact frame it started on.
+  PeriodicSchedule thermal_schedule{
+      sensor_logger::kDeviceStatusSampleIntervalNs};
   ThermalSample last_thermal;
 
   // The camera's own account of the last frame it finished, kept whether or not
@@ -130,11 +146,10 @@ struct AppState {
   // and delete the wrong one.
   std::vector<sensor_logger::SessionItem> cached_sessions;
 
-  // Set by the PRO panel's EXTRINSIC action — see
-  // docs/adr/0011-pro-panel-extrinsic-capture-button.md. `extrinsic_prev_retention`
-  // is what `config.retention` gets put back to when the recording it started
-  // stops; unlike the RETENTION toolbar button, this never reaches
-  // capture.conf, so the file reads the same after the take as before it.
+  // Set by the PRO panel's EXTRINSIC action. `extrinsic_prev_retention` is what
+  // `config.retention` gets put back to when the recording it started stops;
+  // unlike the RETENTION toolbar button, this never reaches capture.conf, so
+  // the file reads the same after the take as before it.
   bool extrinsic_mode_active = false;
   Retention extrinsic_prev_retention = Retention::kSharpest;
 };
@@ -300,6 +315,43 @@ void RevertExtrinsicModeIfActive(AppState* state) {
   state->extrinsic_mode_active = false;
 }
 
+void PollPeriodicStatus(AppState* state) {
+  const int64_t now_ns = sensor_logger::BoottimeNowNs();
+
+  if (state->free_space_schedule.Due(now_ns)) {
+    // The files directory rather than the sessions directory: the latter is
+    // not created until the first session starts, and statvfs on a path that
+    // does not exist reports no space at all.
+    state->free_bytes = FreeBytes(FilesRoot(state->app));
+
+    if (state->recorder.is_recording() &&
+        state->free_bytes < kMinimumFreeBytes) {
+      LocationData end_loc = GetLocationData(state->app);
+      state->recorder.Stop(end_loc);
+      StopRecordingService(state->app);
+      state->camera.UnlockExposureAndFocus();
+      RevertExtrinsicModeIfActive(state);
+      state->stop_reason = "STOPPED - DISK FULL";
+      __android_log_print(ANDROID_LOG_WARN, kTag,
+                          "stopped: %lld bytes free, %lld written",
+                          (long long)state->free_bytes,
+                          (long long)state->recorder.written_frames());
+    }
+  }
+
+  // Read for the HUD even outside a recording. A recording persists the
+  // query's own CLOCK_BOOTTIME timestamp, not the last camera timestamp.
+  if (state->thermal_schedule.Due(now_ns)) {
+    state->last_thermal = ReadThermalSample(state->app);
+    if (state->recorder.is_recording()) {
+      state->recorder.RecordThermal(
+          state->last_thermal.timestamp_ns,
+          state->last_thermal.thermal_status,
+          state->last_thermal.battery_temp_c);
+    }
+  }
+}
+
 void ToggleRecording(AppState* state) {
   if (state->recorder.is_recording()) {
     LocationData end_loc = GetLocationData(state->app);
@@ -342,12 +394,14 @@ void ToggleRecording(AppState* state) {
 
   LocationData start_loc = GetLocationData(state->app);
   if (state->recorder.Start(SessionRoot(state->app), state->last_timestamp_ns,
-                            state->camera.info(), state->config, start_loc)) {
+                            state->camera.info(), state->config,
+                            state->imu.info(), start_loc)) {
     StartRecordingService(state->app);
     state->stop_reason = nullptr;
+    state->frame_stall.Reset(sensor_logger::BoottimeNowNs());
     // So the first thermal sample lands promptly rather than waiting out
-    // however much of the countdown was left over from a previous session.
-    state->thermal_countdown = 0;
+    // however much of the schedule was left over from a previous session.
+    state->thermal_schedule.Reset();
     __android_log_print(ANDROID_LOG_INFO, kTag, "recording to %s",
                         state->recorder.session_path().c_str());
   } else {
@@ -358,8 +412,7 @@ void ToggleRecording(AppState* state) {
 // Starts a camera-IMU extrinsic capture take: forces retention to `all` in
 // memory only (RevertExtrinsicModeIfActive above puts it back, and neither
 // side of that touches capture.conf), closes the PRO panel, and starts
-// recording immediately — the same as pressing volume-down. See
-// docs/adr/0011-pro-panel-extrinsic-capture-button.md.
+// recording immediately — the same as pressing volume-down.
 void StartExtrinsicCapture(AppState* state) {
   if (state->recorder.is_recording()) return;
 
@@ -491,7 +544,7 @@ void CycleShift(AppState* state) {
     return;
   }
 
-  constexpr float kSteps[] = {0.06f, 0.09f, 0.12f, 0.18f};
+  constexpr auto& kSteps = FrameMotion::kShiftPresets;
   constexpr size_t kStepCount = sizeof(kSteps) / sizeof(kSteps[0]);
 
   size_t index = 2;  // 0.12, the default, if nothing close enough matches
@@ -502,6 +555,7 @@ void CycleShift(AppState* state) {
     }
   }
   state->config.min_shift = kSteps[(index + 1) % kStepCount];
+  state->config.shift_rejected = false;
   state->config.Save(FilesRoot(state->app));
 }
 
@@ -524,6 +578,7 @@ void CycleResidual(AppState* state) {
     }
   }
   state->config.min_residual = kSteps[(index + 1) % kStepCount];
+  state->config.residual_rejected = false;
   state->config.Save(FilesRoot(state->app));
 }
 
@@ -585,6 +640,8 @@ void ResetProSettings(AppState* state) {
   state->config.mains_hz = 60;
   state->config.min_shift = 0.12f;
   state->config.min_residual = 0.06f;
+  state->config.shift_rejected = false;
+  state->config.residual_rejected = false;
   state->config.Save(FilesRoot(state->app));
 
   if (fps_changed) {
@@ -701,6 +758,16 @@ std::vector<std::string> StatusLines(const AppState& state) {
                 state.config.min_residual * 100.0f);
   lines.emplace_back(buffer);
 
+  // A capture.conf value outside what FrameMotion can measure is kept at
+  // whatever it was before the file was read; this is the only place that
+  // says so without checking logcat.
+  if (state.config.shift_rejected) {
+    lines.emplace_back("SHIFT CONFIG REJECTED");
+  }
+  if (state.config.residual_rejected) {
+    lines.emplace_back("RESIDUAL CONFIG REJECTED");
+  }
+
   // Lens and retention are already on their own buttons below; the resolution
   // is not shown anywhere else.
   std::snprintf(buffer, sizeof(buffer), "%dX%d",
@@ -725,12 +792,18 @@ std::vector<std::string> StatusLines(const AppState& state) {
   lines.emplace_back(buffer);
 
   // Anything but zero in the first two means the capture is outrunning the
-  // disk, which nothing else on screen would show.
-  std::snprintf(buffer, sizeof(buffer), "DROP %lld NOIMG %lld IMU %lldK",
+  // disk; in IDX, that frames.csv is missing rows for images that were saved.
+  // Nothing else on screen would show either.
+  std::snprintf(buffer, sizeof(buffer), "DROP %lld NOIMG %lld IDX %lld IMU %lldK",
                 (long long)recorder.dropped_frames(),
                 (long long)recorder.frames_without_image(),
+                (long long)recorder.index_write_failures(),
                 (long long)(recorder.imu_samples() / 1000));
   lines.emplace_back(buffer);
+
+  if (state.frame_stall.stalled()) {
+    lines.emplace_back("BG CAPTURE STALLED");
+  }
 
   // Shown whether or not anything is recording — a long session (the
   // multi-hour static IMU-noise captures this app has been used for) is
@@ -771,6 +844,7 @@ void HandleCommand(android_app* app, int32_t cmd) {
       break;
 
     case APP_CMD_PAUSE:
+      state->in_background = true;
       // If we are currently recording, the Foreground Service keeps camera & IMU
       // capture active in the background. Only stop capture if not recording.
       if (!state->recorder.is_recording()) {
@@ -778,10 +852,12 @@ void HandleCommand(android_app* app, int32_t cmd) {
       } else {
         state->recorder.RecordLifecycleEvent(state->last_timestamp_ns,
                                              "background");
+        state->frame_stall.OnFrame(sensor_logger::BoottimeNowNs());
       }
       break;
 
     case APP_CMD_RESUME:
+      state->in_background = false;
       if (state->display != EGL_NO_DISPLAY) StartCapture(state);
       if (state->recorder.is_recording()) {
         state->recorder.RecordLifecycleEvent(state->last_timestamp_ns,
@@ -846,6 +922,11 @@ extern "C" void android_main(android_app* app) {
       }
     }
 
+    // Deliberately before the permission/camera early exits below. Status
+    // polling is a time-based platform task and must continue even if no camera
+    // frame arrives or the activity is backgrounded during a recording.
+    PollPeriodicStatus(&state);
+
     if (!state.permission_granted) {
       state.permission_granted = HasCameraPermission(app);
       if (state.permission_granted) {
@@ -873,12 +954,19 @@ extern "C" void android_main(android_app* app) {
       continue;
     }
 
+    if (state.recorder.is_recording() && state.in_background) {
+      const int32_t fps = state.camera.info().applied_fps;
+      state.frame_stall.Check(sensor_logger::BoottimeNowNs(),
+                              1'000'000'000LL / (fps > 0 ? fps : 30));
+    }
+
     state.camera.DrainResults(&capture_results);
     state.recorder.RecordCaptureResults(capture_results);
     if (!capture_results.empty()) state.last_result = capture_results.back();
 
     if (state.camera.AcquireFrame(&frame)) {
       state.last_timestamp_ns = frame.timestamp_ns;
+      state.frame_stall.OnFrame(sensor_logger::BoottimeNowNs());
       if (state.recorder.is_recording()) state.recorder.Record(frame);
     }
 
@@ -978,45 +1066,14 @@ extern "C" void android_main(android_app* app) {
       }
     }
 
-    // Every couple of seconds at camera rate.
-    if (--state.free_space_countdown <= 0) {
-      // The files directory rather than the sessions directory: the latter is
-      // not created until the first session starts, and statvfs on a path that
-      // does not exist reports no space at all.
-      state.free_bytes = FreeBytes(FilesRoot(app));
-      state.free_space_countdown = 60;
-
-      if (state.recorder.is_recording() &&
-          state.free_bytes < kMinimumFreeBytes) {
-        LocationData end_loc = GetLocationData(app);
-        state.recorder.Stop(end_loc);
-        StopRecordingService(app);
-        state.camera.UnlockExposureAndFocus();
-        RevertExtrinsicModeIfActive(&state);
-        state.stop_reason = "STOPPED - DISK FULL";
-        __android_log_print(ANDROID_LOG_WARN, kTag,
-                            "stopped: %lld bytes free, %lld written",
-                            (long long)state.free_bytes,
-                            (long long)state.recorder.written_frames());
-      }
+    if (state.display == EGL_NO_DISPLAY) {
+      // The repeating request still targets the preview reader while an
+      // active recording keeps the camera alive without a window. Consume
+      // that output anyway: leaving its fixed buffer queue full can stall the
+      // capture output on devices that synchronize their camera streams.
+      state.camera.DrainPreview();
+      continue;
     }
-
-    // Same cadence as the free-space check. Polled here regardless of
-    // recording, for the HUD's battery percent; only written to thermal.csv
-    // while recording, where the point (ADR 9) is lining a throttling event
-    // up against a gap in capture.csv, which is meaningless outside a
-    // session.
-    if (--state.thermal_countdown <= 0) {
-      state.thermal_countdown = 60;
-      state.last_thermal = ReadThermalSample(app);
-      if (state.recorder.is_recording()) {
-        state.recorder.RecordThermal(state.last_timestamp_ns,
-                                     state.last_thermal.thermal_status,
-                                     state.last_thermal.battery_temp_c);
-      }
-    }
-
-    if (state.display == EGL_NO_DISPLAY) continue;
 
     if (state.preview_visible) {
       if (state.camera.AcquirePreviewFrame(&preview_image)) {
@@ -1053,9 +1110,13 @@ extern "C" void android_main(android_app* app) {
                       : "AUTO");
 
     char fps_label[24];
-    if (state.config.fixed_fps > 0) {
-      std::snprintf(fps_label, sizeof(fps_label), "FPS: %d",
+    if (state.config.fixed_fps > 0 &&
+        state.camera.info().applied_fps != state.config.fixed_fps) {
+      std::snprintf(fps_label, sizeof(fps_label), "FPS: %d>AUTO",
                     state.config.fixed_fps);
+    } else if (state.camera.info().applied_fps > 0) {
+      std::snprintf(fps_label, sizeof(fps_label), "FPS: %d",
+                    state.camera.info().applied_fps);
     } else {
       std::snprintf(fps_label, sizeof(fps_label), "FPS: AUTO");
     }

@@ -1,60 +1,44 @@
 # Mobile Sensor Logger
 
-Android app that records camera images and inertial data for 3D reconstruction on a workstation.
+Android app that records camera frames and motion sensor data for building 3D models on a computer.
 
-- Captures at the device's largest `YUV_420_888` size — 4080x3060 on a Galaxy S25 Ultra
-- Writes the sharpest frame of each stretch of movement, not every frame
-- Records accelerometer and gyroscope on the same clock as the images
-- Computes no pose on the device
+- Records raw camera frames with accelerometer and gyroscope data
+- Keeps selected sharp keyframes by default, or every frame when requested
+- Continues an active recording when the app moves to the background
 
-C++ throughout, against the Camera2 NDK. `GameActivity` hosts it, and the only application Java is a small foreground service that keeps recording alive in the background.
+## Install
 
-## Building and running
+No release APK is published yet. See the [build and install guide](docs/building.md) to install it from source.
 
-```bash
-./gradlew assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-Needs the Android SDK, NDK and CMake; versions are pinned in `app/build.gradle.kts` and the wrapper. Built with JDK 21. There is no emulator path — the capture path is a real camera.
+## Using it
 
 | Button | Action |
 | --- | --- |
-| **Volume down** | start and stop recording |
-| **Volume up** | show or hide the camera |
-| **The lock button** | pin the current metered exposure so recording starts on it, wherever the phone is pointed when the key is pressed; refused while recording |
-| **The retention button** | toggle `sharpest` / `all`; refused while recording |
-| **The lens button** | next rear lens; refused while recording |
-| **The PRO button** | open the panel for `shutter`, `fps`, `mains`, `shift` and `residual` — see below; refused while recording |
-| **The sessions button** | view saved sessions, and delete them individually; refused while recording |
-| **Home** | leave, closing the session cleanly |
+| Volume down | start and stop recording |
+| Volume up | show or hide the camera |
+| Lock | pin the current exposure so recording starts on it; reads PINNED once tapped |
+| Retention | switch between keeping the sharpest photos (sharpest) and every photo (all) |
+| Lens | switch to the next rear camera; only on phones with more than one |
+| PRO | open advanced settings, view calibration availability, or start an extrinsic-calibration capture |
+| Sessions | view saved sessions and delete them |
+| Home | send the app to the background; an active recording continues |
 
-The PRO panel has one row per setting that cycles its value on tap, the same way retention and lens already do, plus a **RESET** button beside **CLOSE** that puts all five back to their defaults at once. Unlike retention and lens, a change here is also written back to `capture.conf` (see [docs/settings.md](docs/settings.md)), so it survives the app being killed rather than reverting to whatever the file said when this session opened.
+Lock, Retention, Lens, PRO and Sessions are not available while recording.
 
-Nothing that could lose a capture sits behind a touch. Deleting a session is: tap **DEL** next to it, then tap the same button again to confirm — one tap never deletes anything, and there is no delete-all.
-
-Pulling and clearing a device:
-
-```bash
-adb pull /sdcard/Android/data/com.sensor.logger/files/sessions data/
-adb shell run-as com.sensor.logger \
-  rm -rf /sdcard/Android/data/com.sensor.logger/files/sessions
-```
-
-The second needs `run-as`; a plain `rm` is refused under scoped storage. For removing one session rather than all of them, the sessions button is usually easier than pulling and re-pushing.
+To stop a background recording, return to the app and press volume down. When notification permission is granted, the ongoing notification indicates that background recording is still active.
 
 ## On screen
 
-The camera is not drawn unless volume up asks for it. The numbers are what the screen is for during a capture; the picture is for aiming, which happens between captures more than during one.
+The screen shows numbers rather than the camera picture unless you press volume up.
 
 ```text
 REC 0:57   36 MIN LEFT      elapsed, and how long the free space lasts
-153 KEPT / 1696 SEEN        frames written against frames scored
+153 KEPT / 1696 SEEN        photos saved out of photos checked
 2.9GB USED 111.0GB FREE
-SHIFT 2/12  DIFF 4/6        movement against the thresholds that keep a frame
+SHIFT 2/12  DIFF 4/6        movement against the amount that keeps a photo
 4080X3060
 1/30 ISO247 0.91M           shutter, sensitivity, focus — held or still moving
-DROP 0 NOIMG 0 IMU 36K      drops should be zero
+DROP 0 NOIMG 0 IDX 0 IMU 36K  DROP, NOIMG and IDX should be zero
 BATT 78% 32.1C              shown whether or not anything is recording
 
 [ LOCK ]
@@ -64,21 +48,15 @@ BATT 78% 32.1C              shown whether or not anything is recording
 [ SESSIONS ]
 ```
 
-`MIN LEFT` is measured from the rate this capture is actually filling the disk, not estimated in advance. The lock button reads **PINNED** once tapped, and brighter amber, so a stale pin is obvious rather than only readable from the label. The lens button only appears on a phone with more than one rear camera; the rest are always there, ordered by how often each gets touched around a recording — lock nearly every take, retention and lens less often, PRO rarer still since it is tuned once for a scene rather than every take, and sessions is an occasional housekeeping visit that sits furthest from a thumb reaching for the others in a hurry.
-
-## Tested on
-
-Hardware profiles and camera parameters for tested devices (Galaxy S25 Ultra, Galaxy Z Flip4) are documented in [docs/devices.md](docs/devices.md).
-
 ## Documentation
 
 | Document | Description |
 | --- | --- |
+| [docs/building.md](docs/building.md) | build and install the app from source |
 | [docs/output-format.md](docs/output-format.md) | what a session leaves on disk, and how to read it |
-| [docs/settings.md](docs/settings.md) | `capture.conf`, and what each choice costs |
+| [docs/settings.md](docs/settings.md) | the advanced settings, and what each choice costs |
 | [docs/devices.md](docs/devices.md) | hardware profiles and parameters for tested devices |
-| [docs/calibration-guide.md](docs/calibration-guide.md) | what to do when a device doesn't publish camera calibration |
-| [docs/adr/](docs/adr/) | why it is built this way |
+| [docs/calibration-guide.md](docs/calibration-guide.md) | when to trust Camera2 calibration and when to calibrate a camera or camera-IMU pair yourself |
 
 ## License
 

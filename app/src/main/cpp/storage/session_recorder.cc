@@ -11,6 +11,8 @@
 #include <cstring>
 #include <utility>
 
+#include "motion_grid_format.h"
+#include "periodic_schedule.h"
 #include "sharpness.h"
 
 namespace sensor_logger {
@@ -63,6 +65,26 @@ void WriteLocationField(std::ofstream& out, const char* key,
   }
 }
 
+void WriteImuSensorField(std::ofstream& out, const char* key,
+                         const ImuSensorInfo& info,
+                         const TimestampStatsSnapshot& timing) {
+  out << "  \"" << key << "\": {\n"
+      << "    \"available\": " << (info.available ? "true" : "false")
+      << ",\n"
+      << "    \"name\": \"" << Escaped(info.name) << "\",\n"
+      << "    \"vendor\": \"" << Escaped(info.vendor) << "\",\n"
+      << "    \"min_delay_us\": " << info.min_delay_us << ",\n"
+      << "    \"enable_result\": " << info.enable_result << ",\n"
+      << "    \"set_rate_result\": " << info.set_rate_result << ",\n"
+      << "    \"samples\": " << timing.samples << ",\n"
+      << "    \"mean_period_ns\": " << timing.mean_period_ns << ",\n"
+      << "    \"median_period_ns\": " << timing.median_period_ns << ",\n"
+      << "    \"max_gap_ns\": " << timing.max_gap_ns << ",\n"
+      << "    \"non_monotonic_timestamps\": "
+      << timing.non_monotonic_timestamps << "\n"
+      << "  },\n";
+}
+
 bool DirectoryExists(const std::string& path) {
   struct stat info{};
   return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
@@ -110,6 +132,7 @@ bool SessionRecorder::Start(const std::string& root,
                             int64_t start_timestamp_ns,
                             const CameraInfo& camera,
                             const CaptureConfig& config,
+                            const ImuInfo& imu,
                             const LocationData& start_location) {
   if (recording_) return false;
   if (!MakeDirectory(root)) return false;
@@ -139,14 +162,18 @@ bool SessionRecorder::Start(const std::string& root,
   capture_.open(session_path_ + "/capture.csv", std::ios::out | std::ios::trunc);
   thermal_.open(session_path_ + "/thermal.csv", std::ios::out | std::ios::trunc);
   lifecycle_.open(session_path_ + "/lifecycle.csv", std::ios::out | std::ios::trunc);
+  motion_grid_.open(session_path_ + "/motion_grid.bin",
+                    std::ios::out | std::ios::trunc | std::ios::binary);
   if (!frames_.is_open() || !imu_.is_open() || !candidates_.is_open() ||
-      !capture_.is_open() || !thermal_.is_open() || !lifecycle_.is_open()) {
+      !capture_.is_open() || !thermal_.is_open() || !lifecycle_.is_open() ||
+      !motion_grid_.is_open()) {
     frames_.close();
     imu_.close();
     candidates_.close();
     capture_.close();
     thermal_.close();
     lifecycle_.close();
+    motion_grid_.close();
     return false;
   }
 
@@ -162,13 +189,24 @@ bool SessionRecorder::Start(const std::string& root,
   lifecycle_ << "timestamp_ns,event\n";
 
   motion_.Reset();
-  motion_.SetThresholds(config.min_shift, config.min_residual);
+  selector_.Reset();
+  motion_grid_header_written_ = false;
+  if (!motion_.SetThresholds(config.min_shift, config.min_residual)) {
+    __android_log_print(ANDROID_LOG_WARN, kTag,
+                        "rejected shift/residual thresholds %.3f/%.3f; kept "
+                        "%.3f/%.3f",
+                        config.min_shift, config.min_residual,
+                        motion_.min_shift(), motion_.min_residual());
+  }
   pending_.Clear();
+  window_candidate_.Clear();
+  stationary_candidate_.Clear();
   writer_.Start([this](PendingFrame& frame) { WriteFrame(frame); });
 
   start_timestamp_ns_ = start_timestamp_ns;
   start_location_ = start_location;
   camera_ = camera;
+  imu_info_ = imu;
   retention_ = config.retention;
   max_exposure_ns_ = config.max_exposure_ns;
   mains_hz_ = config.mains_hz;
@@ -179,7 +217,15 @@ bool SessionRecorder::Start(const std::string& root,
   considered_frames_ = 0;
   camera_completed_captures_ = 0;
   frames_without_image_ = 0;
+  index_write_failures_ = 0;
   imu_samples_ = 0;
+  camera_timing_.Reset();
+  accelerometer_timing_.Reset();
+  gyroscope_timing_.Reset();
+
+  // Before anything is recorded: a session that dies without reaching Stop()
+  // still says what took it and with which settings.
+  WriteManifest(start_timestamp_ns, LocationData{}, /*complete=*/false);
 
   recording_ = true;
   return true;
@@ -202,32 +248,78 @@ void SessionRecorder::Record(const FrameData& frame) {
       LumaSharpness(luma.data, frame.image.width, frame.image.height,
                     luma.row_stride, kSharpnessStep);
 
-  // Before the decision, so the row describes the frame as it was offered
-  // rather than as it was treated.
-  const bool moved = motion_.Accept(frame.image);
+  // Before anything below reacts to it, so the row describes the frame as it
+  // was measured rather than as it was treated.
+  const bool had_reference = motion_.has_reference();
+  motion_.Measure(frame.image);
   WriteCandidate(frame.timestamp_ns, sharpness);
+  WriteMotionGridRecord(frame.timestamp_ns);
 
   // Keeping everything skips the comparison entirely: each frame goes straight
   // out, and the sharpness and motion still land in candidates.csv so the
   // selection rule can be judged against a take it did not get to make.
   if (retention_ == Retention::kAll) {
     pending_.Set(frame, sharpness);
-    FlushPending();
+    FlushPendingFrame(pending_);
+    motion_.Commit(motion_.current_grid(), motion_.current_grid_height());
     return;
   }
 
-  // Enough movement closes the current stretch: whatever the sharpest frame in
-  // it turned out to be is written now, and this frame opens the next.
-  if (moved) {
-    FlushPending();
-    pending_.Set(frame, sharpness);
+  if (!had_reference) {
+    // The first frame of the session: nothing to measure it against yet, so it
+    // becomes the stationary baseline — not a keyframe in its own right until
+    // a later frame confirms or supersedes it. The window candidate remains
+    // empty until motion approaches its target, avoiding a redundant full-size
+    // copy of this same first frame.
+    selector_.Confirmed(frame.timestamp_ns);
+    SetCandidate(&stationary_candidate_, frame, sharpness);
     return;
   }
 
-  // Still within the stretch — this frame only matters if it beats the leader.
-  if (!pending_.valid() || sharpness > pending_.sharpness()) {
-    pending_.Set(frame, sharpness);
+  selector_.Observe(frame.timestamp_ns, motion_.last_shift(), motion_.last_residual(),
+                    motion_.min_shift(), motion_.min_residual());
+
+  // The window narrows which candidates can win the spacing-driven confirm
+  // below to ones close to where target was reached. The sharpest frame of the
+  // whole stretch can be too close to or too far from the previous keyframe.
+  if (selector_.InWindow() &&
+      (!window_candidate_.valid() ||
+       sharpness > window_candidate_.frame.sharpness())) {
+    SetCandidate(&window_candidate_, frame, sharpness);
   }
+  // Tracked unconditionally, for the stationary ceiling: unlike the window
+  // candidate, this one is never empty once any frame has arrived.
+  if (!stationary_candidate_.valid() ||
+      sharpness > stationary_candidate_.frame.sharpness()) {
+    SetCandidate(&stationary_candidate_, frame, sharpness);
+  }
+
+  const KeyframeSelector::ConfirmReason reason = selector_.ShouldConfirm();
+  if (reason == KeyframeSelector::ConfirmReason::kNone) return;
+
+  // window_candidate_ can still be empty on a kWindow confirm if the very
+  // first frame observed after the last keyframe already crossed target —
+  // ShouldConfirm() went true before InWindow() ever had a frame to accept.
+  Candidate* winner = (reason == KeyframeSelector::ConfirmReason::kWindow &&
+                      window_candidate_.valid())
+                          ? &window_candidate_
+                          : &stationary_candidate_;
+  ConfirmKeyframe(winner, frame.timestamp_ns);
+}
+
+void SessionRecorder::SetCandidate(Candidate* candidate, const FrameData& frame,
+                                   float sharpness) {
+  candidate->frame.Set(frame, sharpness);
+  candidate->grid = motion_.current_grid();
+  candidate->grid_height = motion_.current_grid_height();
+}
+
+void SessionRecorder::ConfirmKeyframe(Candidate* winner, int64_t timestamp_ns) {
+  motion_.Commit(winner->grid, winner->grid_height);
+  FlushPendingFrame(winner->frame);
+  window_candidate_.Clear();
+  stationary_candidate_.Clear();
+  selector_.Confirmed(timestamp_ns);
 }
 
 void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
@@ -243,6 +335,10 @@ void SessionRecorder::RecordImu(const std::vector<ImuSample>& samples) {
   // straight into the manifest a workstation trusts as "every sample landed."
   if (imu_.good()) {
     imu_samples_ += static_cast<int64_t>(samples.size());
+    for (const ImuSample& sample : samples) {
+      (sample.is_gyroscope ? gyroscope_timing_ : accelerometer_timing_)
+          .Observe(sample.timestamp_ns);
+    }
   } else {
     __android_log_print(ANDROID_LOG_ERROR, kTag,
                         "imu.csv write failed; sample count now understates "
@@ -265,6 +361,9 @@ void SessionRecorder::RecordCaptureResults(
   capture_.flush();
   if (capture_.good()) {
     camera_completed_captures_ += static_cast<int64_t>(results.size());
+    for (const CaptureResult& result : results) {
+      camera_timing_.Observe(result.timestamp_ns);
+    }
   } else {
     __android_log_print(ANDROID_LOG_ERROR, kTag,
                         "capture.csv write failed; completed-capture count "
@@ -305,18 +404,38 @@ void SessionRecorder::WriteCandidate(int64_t timestamp_ns, float sharpness) {
   }
 }
 
-void SessionRecorder::FlushPending() {
-  if (!pending_.valid()) return;
+void SessionRecorder::WriteMotionGridRecord(int64_t timestamp_ns) {
+  if (!motion_grid_header_written_) {
+    MotionGridHeader header;
+    std::memcpy(header.magic, kMotionGridMagic, sizeof(header.magic));
+    header.format_version = kMotionGridFormatVersion;
+    header.grid_width = FrameMotion::kGridWidth;
+    header.grid_height = motion_.current_grid_height();
+    motion_grid_.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    motion_grid_header_written_ = true;
+  }
+
+  motion_grid_.write(reinterpret_cast<const char*>(&timestamp_ns), sizeof(timestamp_ns));
+  const std::vector<uint8_t>& grid = motion_.current_grid();
+  motion_grid_.write(reinterpret_cast<const char*>(grid.data()),
+                     static_cast<std::streamsize>(grid.size()));
+  if (!motion_grid_.good()) {
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "motion_grid.bin write failed");
+  }
+}
+
+void SessionRecorder::FlushPendingFrame(PendingFrame& frame) {
+  if (!frame.valid()) return;
 
   // Dropped rather than written late, and counted by the writer. The queue only
   // fills when the disk is behind, and the frame that would clear the backlog
   // by waiting is the one whose viewpoint the capture is currently at.
-  writer_.Submit(std::move(pending_));
-  pending_.Clear();
+  writer_.Submit(std::move(frame));
+  frame.Clear();
 
   // Its buffer went with it; take a spent one so the next copy is not into
   // freshly mapped pages.
-  pending_.AdoptBuffer(writer_.TakeBuffer());
+  frame.AdoptBuffer(writer_.TakeBuffer());
 }
 
 void SessionRecorder::WriteFrame(PendingFrame& frame) {
@@ -326,13 +445,17 @@ void SessionRecorder::WriteFrame(PendingFrame& frame) {
     return;
   }
 
+  if (!WriteIndexRow(frame, filename)) {
+    ++index_write_failures_;
+    __android_log_print(ANDROID_LOG_ERROR, kTag,
+                        "frames.csv write failed for %s; the image is on disk "
+                        "but not indexed",
+                        filename.c_str());
+    return;
+  }
+
   ++written_frames_;
   written_bytes_ += static_cast<int64_t>(frame.pixels().size());
-
-  // Flushed per frame rather than at Stop(). A session that ends by the process
-  // being killed — which is how a backgrounded capture usually ends — would
-  // otherwise leave the images on disk with an empty index describing them.
-  frames_.flush();
 }
 
 bool SessionRecorder::WriteImage(const PendingFrame& frame,
@@ -349,8 +472,11 @@ bool SessionRecorder::WriteImage(const PendingFrame& frame,
   // fail at close() (e.g. ENOSPC surfacing only on the final flush) — indexing
   // the frame as written past this point would leave frames.csv pointing at a
   // truncated file that looks valid to any downstream reader.
-  if (!out) return false;
+  return static_cast<bool>(out);
+}
 
+bool SessionRecorder::WriteIndexRow(const PendingFrame& frame,
+                                    const std::string& filename) {
   frames_ << frame.timestamp_ns() << ',' << filename << ',' << frame.width()
           << ',' << frame.height() << ',' << frame.sharpness() << ','
           << ChromaLayoutName(frame.chroma_layout()) << ','
@@ -360,15 +486,28 @@ bool SessionRecorder::WriteImage(const PendingFrame& frame,
     frames_ << ',' << frame.segment_length(i);
   }
   frames_ << '\n';
-  return true;
+
+  // Flushed per frame rather than at Stop(). A session that ends by the process
+  // being killed — which is how a backgrounded capture usually ends — would
+  // otherwise leave the images on disk with an empty index describing them.
+  // The result is checked here for the same reason: a row the stream refused
+  // is not an indexed frame.
+  frames_.flush();
+  return frames_.good();
 }
 
 void SessionRecorder::Stop(const LocationData& end_location) {
   if (!recording_) return;
 
-  // The last stretch is never closed by movement, so its leader would otherwise
-  // be lost.
-  FlushPending();
+  // The last stretch is never closed by movement, so whatever led it would
+  // otherwise be lost entirely. Prefer the window candidate — closer to the
+  // intended spacing — and fall back to the stationary one, which is never
+  // empty once any frame arrived, if the window never opened.
+  FlushPendingFrame(pending_);
+  FlushPendingFrame(window_candidate_.valid() ? window_candidate_.frame
+                                              : stationary_candidate_.frame);
+  window_candidate_.Clear();
+  stationary_candidate_.Clear();
 
   // Before the streams close: the writer thread is what writes to them.
   writer_.Stop();
@@ -379,14 +518,17 @@ void SessionRecorder::Stop(const LocationData& end_location) {
   capture_.close();
   thermal_.close();
   lifecycle_.close();
-  WriteManifest(last_timestamp_ns_, end_location);
+  motion_grid_.close();
+  WriteManifest(last_timestamp_ns_, end_location, /*complete=*/true);
   recording_ = false;
 }
 
 void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
-                                     const LocationData& end_location) {
-  std::ofstream manifest(session_path_ + "/session.json",
-                         std::ios::out | std::ios::trunc);
+                                     const LocationData& end_location,
+                                     bool complete) {
+  const std::string manifest_path = session_path_ + "/session.json";
+  const std::string temp_path = manifest_path + ".tmp";
+  std::ofstream manifest(temp_path, std::ios::out | std::ios::trunc);
   if (!manifest.is_open()) return;
 
   const double duration_seconds =
@@ -395,6 +537,15 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
           : 0.0;
   const double average_fps =
       (duration_seconds > 0.0) ? (considered_frames_ / duration_seconds) : 0.0;
+  const TimestampStatsSnapshot accelerometer_timing =
+      accelerometer_timing_.Snapshot();
+  const TimestampStatsSnapshot gyroscope_timing =
+      gyroscope_timing_.Snapshot();
+  const TimestampStatsSnapshot camera_timing = camera_timing_.Snapshot();
+  const double camera_observed_fps =
+      camera_timing.mean_period_ns > 0
+          ? 1e9 / static_cast<double>(camera_timing.mean_period_ns)
+          : 0.0;
 
   double fov_h = 0.0;
   double fov_v = 0.0;
@@ -409,6 +560,10 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
   // its camera and its sensors, and the format assumptions along with them, so
   // a capture that does not say what took it cannot be checked against another.
   manifest << "{\n"
+           << "  \"status\": \"" << (complete ? "complete" : "recording")
+           << "\",\n"
+           << "  \"app_version_name\": \"" APP_VERSION_NAME "\",\n"
+           << "  \"app_version_code\": " << APP_VERSION_CODE << ",\n"
            << "  \"device\": \""
            << Escaped(SystemProperty("ro.product.manufacturer")) << " "
            << Escaped(SystemProperty("ro.product.model")) << "\",\n"
@@ -422,14 +577,46 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << Escaped(SystemProperty("ro.build.version.release")) << "\",\n"
            << "  \"android_sdk\": "
            << SystemProperty("ro.build.version.sdk") << ",\n"
-           << "  \"start_timestamp_ns\": " << start_timestamp_ns_ << ",\n"
-           << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
-           << "  \"duration_seconds\": " << duration_seconds << ",\n"
-           << "  \"average_fps\": " << average_fps << ",\n"
+           << "  \"start_timestamp_ns\": " << start_timestamp_ns_ << ",\n";
+  if (complete) {
+    manifest << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
+             << "  \"duration_seconds\": " << duration_seconds << ",\n"
+             << "  \"average_fps\": " << average_fps << ",\n";
+  }
+  manifest
+           << "  \"camera_fps_requested\": " << camera_.requested_fps
+           << ",\n"
+           << "  \"camera_fps_applied\": " << camera_.applied_fps << ",\n"
+           << "  \"camera_fps_request_supported\": "
+           << (camera_.fps_request_supported ? "true" : "false") << ",\n"
+           << "  \"camera_fps_set_result\": " << camera_.fps_set_result
+           << ",\n"
+           << "  \"camera_fixed_fps_range_available\": "
+           << (camera_.fixed_fps_range_available ? "true" : "false")
+           << ",\n"
+           << "  \"camera_min_frame_duration_ns\": "
+           << camera_.min_frame_duration_ns << ",\n"
+           << "  \"camera_max_output_fps\": " << camera_.max_output_fps
+           << ",\n"
+           << "  \"camera_observed_fps\": " << camera_observed_fps << ",\n"
+           << "  \"camera_mean_period_ns\": " << camera_timing.mean_period_ns
+           << ",\n"
+           << "  \"camera_median_period_ns\": "
+           << camera_timing.median_period_ns << ",\n"
+           << "  \"camera_max_gap_ns\": " << camera_timing.max_gap_ns
+           << ",\n"
+           << "  \"camera_non_monotonic_timestamps\": "
+           << camera_timing.non_monotonic_timestamps << ",\n"
+           << "  \"thermal_sample_target_interval_ns\": "
+           << kDeviceStatusSampleIntervalNs << ",\n"
+           << "  \"free_space_check_target_interval_ns\": "
+           << kFreeSpaceCheckIntervalNs << ",\n"
            << "  \"written_frames\": " << written_frames_.load() << ",\n"
            << "  \"written_bytes\": " << written_bytes_.load() << ",\n"
            << "  \"considered_frames\": " << considered_frames_ << ",\n"
            << "  \"frames_without_image\": " << frames_without_image_.load()
+           << ",\n"
+           << "  \"index_write_failures\": " << index_write_failures_.load()
            << ",\n"
            << "  \"dropped_frames\": " << writer_.dropped() << ",\n"
            << "  \"camera_completed_captures\": " << camera_completed_captures_
@@ -441,7 +628,13 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
               "newer image instead; not counted by dropped_frames, which is "
               "the writer queue only\",\n"
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
-           << "  \"retention\": \""
+           << "  \"imu_requested_interval_us\": "
+           << imu_info_.requested_interval_us << ",\n";
+  WriteImuSensorField(manifest, "accelerometer", imu_info_.accelerometer,
+                      accelerometer_timing);
+  WriteImuSensorField(manifest, "gyroscope", imu_info_.gyroscope,
+                      gyroscope_timing);
+  manifest << "  \"retention\": \""
            << (retention_ == Retention::kAll ? "all" : "sharpest") << "\",\n"
            << "  \"min_shift\": " << motion_.min_shift() << ",\n"
            << "  \"min_residual\": " << motion_.min_residual() << ",\n"
@@ -501,7 +694,7 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
   }
 
   WriteLocationField(manifest, "start_location", start_location_);
-  WriteLocationField(manifest, "end_location", end_location);
+  if (complete) WriteLocationField(manifest, "end_location", end_location);
 
   manifest << "  \"stabilisation\": \"off, both optical and digital; either "
               "one changes the camera geometry between frames\",\n"
@@ -523,6 +716,9 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
               "ends when the picture shifts or stops matching\"\n"
            << "}\n";
   manifest.close();
+  if (manifest && std::rename(temp_path.c_str(), manifest_path.c_str()) != 0) {
+    manifest.setstate(std::ios::failbit);
+  }
   if (!manifest) {
     // Most likely to happen exactly when the disk filled up mid-session —
     // the one moment a corrupt/partial session.json is worst, since it is

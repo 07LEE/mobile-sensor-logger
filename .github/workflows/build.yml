@@ -1,0 +1,43 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build steps are per language.
+      - uses: actions/setup-python@v5
+        if: hashFiles('pyproject.toml') != ''
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        if: hashFiles('pyproject.toml') != ''
+        run: |
+          python -m pip install build
+          python -m build
+
+      # Android. Set the NDK and CMake versions to the ones the project pins,
+      # or drop that step if there is no native code.
+      - uses: actions/setup-java@v4
+        if: hashFiles('**/AndroidManifest.xml') != ''
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: hashFiles('**/AndroidManifest.xml') != ''
+
+      - name: Install NDK and CMake
+        if: hashFiles('**/AndroidManifest.xml') != ''
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Build debug APK
+        if: hashFiles('**/AndroidManifest.xml') != ''
+        run: ./gradlew assembleDebug

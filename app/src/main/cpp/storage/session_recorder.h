@@ -13,9 +13,11 @@
 #include "frame_motion.h"
 #include "frame_writer.h"
 #include "imu_source.h"
+#include "keyframe_selector.h"
 #include "location.h"
 #include "pending_frame.h"
 #include "session_item.h"
+#include "timestamp_stats.h"
 
 namespace sensor_logger {
 
@@ -65,6 +67,7 @@ class SessionRecorder {
   // Creates the session directory under `root` and opens the log files.
   bool Start(const std::string& root, int64_t start_timestamp_ns,
              const CameraInfo& camera, const CaptureConfig& config,
+             const ImuInfo& imu,
              const LocationData& start_location = LocationData());
 
   // Offers a frame. Scored and buffered; written only if it ends up the
@@ -91,11 +94,9 @@ class SessionRecorder {
                      float battery_temp_c);
 
   // Foreground/background transitions (APP_CMD_PAUSE / APP_CMD_RESUME).
-  // Backgrounding relies on the Foreground Service to keep the camera alive
-  // (ADR 7); if that ever silently fails, the OS's own background camera
-  // restriction is a plausible cause of a capture.csv gap that has nothing to
-  // do with buffers or heat. Recorded so that question never again depends on
-  // remembering whether the app was backgrounded partway through a take.
+  // Backgrounding relies on the Foreground Service and on draining every
+  // configured camera output. Recorded so a capture.csv gap can be compared
+  // with lifecycle state instead of relying on memory of the take.
   void RecordLifecycleEvent(int64_t timestamp_ns, const char* event);
 
   // Writes any buffered frame, then closes the session.
@@ -105,6 +106,7 @@ class SessionRecorder {
   int64_t written_frames() const { return written_frames_; }
   int64_t considered_frames() const { return considered_frames_; }
   int64_t frames_without_image() const { return frames_without_image_; }
+  int64_t index_write_failures() const { return index_write_failures_; }
   int64_t dropped_frames() const { return writer_.dropped(); }
   int64_t imu_samples() const { return imu_samples_; }
 
@@ -142,17 +144,43 @@ class SessionRecorder {
   float last_residual() const { return motion_.last_residual(); }
 
  private:
+  // A candidate frame competing to be the next keyframe: the sharpest seen so
+  // far, plus the FrameMotion grid it was measured against at the time it took
+  // the lead. The grid is a few KB, cheap to carry alongside a candidate that
+  // might not win — unlike its raw image, which PendingFrame already holds at
+  // the cost of one buffer. Separate window and stationary candidates keep the
+  // spacing-driven and elapsed-time confirmation paths independent.
+  struct Candidate {
+    PendingFrame frame;
+    std::vector<uint8_t> grid;
+    int32_t grid_height = 0;
+
+    bool valid() const { return frame.valid(); }
+    void Clear() {
+      frame.Clear();
+      grid.clear();
+      grid_height = 0;
+    }
+  };
+
   void WriteCandidate(int64_t timestamp_ns, float sharpness);
-  void FlushPending();
+  void WriteMotionGridRecord(int64_t timestamp_ns);
+  void FlushPendingFrame(PendingFrame& frame);
+  void SetCandidate(Candidate* candidate, const FrameData& frame, float sharpness);
+  void ConfirmKeyframe(Candidate* winner, int64_t timestamp_ns);
 
   // Both run on the writer thread. Nothing else touches frames_,
-  // written_frames_ or frames_without_image_ while it is running, which is what
-  // keeps them free of locking.
+  // written_frames_, frames_without_image_ or index_write_failures_ while it is
+  // running, which is what keeps them free of locking.
   void WriteFrame(PendingFrame& frame);
   bool WriteImage(const PendingFrame& frame, const std::string& filename);
+  bool WriteIndexRow(const PendingFrame& frame, const std::string& filename);
 
-  void WriteManifest(int64_t end_timestamp_ns,
-                     const LocationData& end_location);
+  // Written once at Start() with complete == false, for what is already known,
+  // and again at Stop() with the final values. Through a temporary file, so an
+  // update cut short leaves the earlier one in place.
+  void WriteManifest(int64_t end_timestamp_ns, const LocationData& end_location,
+                     bool complete);
 
   bool recording_ = false;
   std::string session_path_;
@@ -163,13 +191,32 @@ class SessionRecorder {
   std::ofstream thermal_;
   std::ofstream lifecycle_;
 
+  // Offline replay input. Opened in Start() like the other logs, but its header
+  // needs grid_height, which FrameMotion only knows after its first Measure()
+  // call — so it is written lazily, on the first record.
+  std::ofstream motion_grid_;
+  bool motion_grid_header_written_ = false;
+
   FrameMotion motion_;
+  KeyframeSelector selector_;
+
+  // Only used by Retention::kAll, where every frame is written immediately
+  // and there is no competition between candidates to track.
   PendingFrame pending_;
+
+  // The kSharpest path's two competing candidates. window_candidate_ can be
+  // empty even after the window has opened, if the very first frame past the
+  // last keyframe already crosses target; stationary_candidate_ never is,
+  // once any frame has arrived.
+  Candidate window_candidate_;
+  Candidate stationary_candidate_;
+
   FrameWriter writer_;
 
   int64_t start_timestamp_ns_ = 0;
   LocationData start_location_{};
   CameraInfo camera_{};
+  ImuInfo imu_info_{};
   Retention retention_ = Retention::kSharpest;
 
   // Carried through from CaptureConfig only for the manifest: what a session
@@ -183,9 +230,16 @@ class SessionRecorder {
   std::atomic<int64_t> written_frames_{0};
   std::atomic<int64_t> written_bytes_{0};
   std::atomic<int64_t> frames_without_image_{0};
+  // Images that reached the disk but whose frames.csv row did not. Kept apart
+  // from frames_without_image_: the pixels are there, but nothing says how to
+  // read them.
+  std::atomic<int64_t> index_write_failures_{0};
   int64_t considered_frames_ = 0;
   int64_t camera_completed_captures_ = 0;
   int64_t imu_samples_ = 0;
+  TimestampStats camera_timing_;
+  TimestampStats accelerometer_timing_;
+  TimestampStats gyroscope_timing_;
 };
 
 }  // namespace sensor_logger

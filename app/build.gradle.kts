@@ -20,6 +20,10 @@ android {
             cmake {
                 cppFlags += "-std=c++17"
                 arguments += "-DANDROID_STL=c++_shared"
+                // So a session's manifest can say which build produced it,
+                // without repeating the version gradle.properties already owns.
+                arguments += "-DAPP_VERSION_NAME=${property("VERSION_NAME")}"
+                arguments += "-DAPP_VERSION_CODE=${property("VERSION_CODE")}"
             }
         }
 
@@ -42,9 +46,26 @@ android {
         }
     }
 
+    // The release key comes from the environment so it never sits in the
+    // repository. Without it the release build is signed with the debug key,
+    // which installs but is not a distribution identity.
+    val releaseKeystore = System.getenv("KEYSTORE_FILE")
+    if (releaseKeystore != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
 

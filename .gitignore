@@ -16,3 +16,8 @@ compile_commands.json
 
 # Personal working notes, in Korean. Not part of the published project.
 /.project/
+
+# Release signing material
+*.jks
+*.keystore
+keystore.properties

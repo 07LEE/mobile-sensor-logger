@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check tag is on the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "Tag $GITHUB_REF_NAME is not on $DEFAULT_BRANCH. Merge to $DEFAULT_BRANCH and tag there."
+            exit 1
+          fi
+
+      - name: Check tag matches package version
+        run: |
+          version=""
+          if [ -f pyproject.toml ]; then
+            version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          elif [ -f package.json ]; then
+            version=$(jq -r .version package.json)
+          elif [ -f Cargo.toml ]; then
+            version=$(grep -m1 -E '^version *= *"' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          elif [ -f gradle.properties ] && grep -q '^VERSION_NAME=' gradle.properties; then
+            version=$(sed -n 's/^VERSION_NAME=//p' gradle.properties | tr -d '\r')
+          fi
+          if [ -z "$version" ]; then
+            echo "No version file found, skipping"
+            exit 0
+          fi
+          case "$GITHUB_REF_NAME" in
+            *-*) echo "Pre-release tag, skipping version comparison"; exit 0 ;;
+          esac
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version v$version"
+            exit 1
+          fi
+
+      # Build steps are per language. Put release artifacts in dist/.
+      - uses: actions/setup-python@v5
+        if: hashFiles('pyproject.toml') != ''
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        if: hashFiles('pyproject.toml') != ''
+        run: |
+          python -m pip install build
+          python -m build
+
+      # Android. Set the NDK and CMake versions to the ones the project pins,
+      # or drop that step if there is no native code.
+      - uses: actions/setup-java@v4
+        if: hashFiles('**/AndroidManifest.xml') != ''
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: hashFiles('**/AndroidManifest.xml') != ''
+
+      - name: Install NDK and CMake
+        if: hashFiles('**/AndroidManifest.xml') != ''
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Restore the release keystore
+        if: hashFiles('**/AndroidManifest.xml') != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "${KEYSTORE_BASE64}" ]; then
+            echo "::warning::KEYSTORE_BASE64 is not set; signing with the debug key"
+            exit 0
+          fi
+          echo "${KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/release.jks"
+          echo "KEYSTORE_FILE=${RUNNER_TEMP}/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        if: hashFiles('**/AndroidManifest.xml') != ''
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/${GITHUB_REPOSITORY#*/}-${GITHUB_REF_NAME}.apk"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          case "$GITHUB_REF_NAME" in
+            *-*) args+=(--prerelease) ;;
+          esac
+          files=()
+          if compgen -G "dist/*" > /dev/null; then
+            files=(dist/*)
+          fi
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" "${args[@]}" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag

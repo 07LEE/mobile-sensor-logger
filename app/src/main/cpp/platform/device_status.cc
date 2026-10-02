@@ -3,6 +3,8 @@
 #include <game-activity/GameActivity.h>
 #include <game-activity/native_app_glue/android_native_app_glue.h>
 
+#include "periodic_schedule.h"
+
 namespace sensor_logger {
 
 ThermalSample ReadThermalSample(android_app* app) {
@@ -120,6 +122,7 @@ ThermalSample ReadThermalSample(android_app* app) {
 
   env->DeleteLocalRef(context_class);
   env->DeleteLocalRef(activity_class);
+  out.timestamp_ns = BoottimeNowNs();
   return out;
 }
 

@@ -6,11 +6,14 @@
 #include <media/NdkImage.h>
 
 #include <chrono>
+#include <cinttypes>
 #include <cmath>
 #include <cstddef>
 #include <mutex>
 #include <utility>
 #include <vector>
+
+#include "fps_selection.h"
 
 namespace sensor_logger {
 namespace {
@@ -277,6 +280,16 @@ bool CameraSource::ReadCamera(const char* id, ACameraMetadata* characteristics,
 
   out->id = id;
 
+  std::vector<FpsRange> available_fps_ranges;
+  if (ACameraMetadata_getConstEntry(
+          characteristics, ACAMERA_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,
+          &entry) == ACAMERA_OK) {
+    for (uint32_t i = 0; i + 1 < entry.count; i += 2) {
+      available_fps_ranges.push_back(
+          FpsRange{entry.data.i32[i], entry.data.i32[i + 1]});
+    }
+  }
+
   if (ACameraMetadata_getConstEntry(characteristics,
                                     ACAMERA_LENS_INFO_AVAILABLE_FOCAL_LENGTHS,
                                     &entry) == ACAMERA_OK &&
@@ -426,6 +439,33 @@ bool CameraSource::ReadCamera(const char* id, ACameraMetadata* characteristics,
     }
   }
 
+  int64_t min_frame_duration_ns = 0;
+  if (ACameraMetadata_getConstEntry(
+          characteristics, ACAMERA_SCALER_AVAILABLE_MIN_FRAME_DURATIONS,
+          &entry) == ACAMERA_OK) {
+    for (uint32_t i = 0; i + 3 < entry.count; i += 4) {
+      if (entry.data.i64[i] != AIMAGE_FORMAT_YUV_420_888 ||
+          entry.data.i64[i + 1] != *capture_width ||
+          entry.data.i64[i + 2] != *capture_height) {
+        continue;
+      }
+      const int64_t duration = entry.data.i64[i + 3];
+      if (duration > 0 &&
+          (min_frame_duration_ns == 0 || duration < min_frame_duration_ns)) {
+        min_frame_duration_ns = duration;
+      }
+    }
+  }
+
+  const FpsSelection fps =
+      SelectFps(config.fixed_fps, available_fps_ranges, min_frame_duration_ns);
+  out->requested_fps = fps.requested_fps;
+  out->applied_fps = fps.applied_fps;
+  out->max_output_fps = fps.max_output_fps;
+  out->min_frame_duration_ns = fps.min_frame_duration_ns;
+  out->fps_request_supported = fps.request_supported;
+  out->fixed_fps_range_available = fps.fixed_range_available;
+
   // The preview is the largest size under the cap *with the same shape as the
   // capture*. Devices offer several aspect ratios, and the largest that fits is
   // often not the capture's — which would put a different field of view on
@@ -563,6 +603,23 @@ bool CameraSource::SelectCamera(const CaptureConfig& config) {
   preview_width_ = chosen->preview_width;
   preview_height_ = chosen->preview_height;
 
+  if (info_.requested_fps > 0) {
+    if (info_.fps_request_supported) {
+      __android_log_print(ANDROID_LOG_INFO, kTag,
+                          "camera %s applying fixed %dfps at %dx%d",
+                          camera_id_.c_str(), info_.applied_fps,
+                          capture_width_, capture_height_);
+    } else {
+      __android_log_print(
+          ANDROID_LOG_WARN, kTag,
+          "camera %s cannot apply fixed %dfps at %dx%d "
+          "(fixed_range=%d min_frame=%" PRId64 "ns max=%d); using auto",
+          camera_id_.c_str(), info_.requested_fps, capture_width_,
+          capture_height_, info_.fixed_fps_range_available,
+          info_.min_frame_duration_ns, info_.max_output_fps);
+    }
+  }
+
   if (config.capture_width > 0 &&
       (capture_width_ != config.capture_width ||
        capture_height_ != config.capture_height)) {
@@ -690,8 +747,15 @@ bool CameraSource::StartSession() {
   // move again once a recording starts, whatever fps is set to.
   if (fixed_fps_ > 0) {
     const int32_t fps_range[2] = {fixed_fps_, fixed_fps_};
-    ACaptureRequest_setEntry_i32(request_, ACAMERA_CONTROL_AE_TARGET_FPS_RANGE,
-                                 2, fps_range);
+    info_.fps_set_result = ACaptureRequest_setEntry_i32(
+        request_, ACAMERA_CONTROL_AE_TARGET_FPS_RANGE, 2, fps_range);
+    if (info_.fps_set_result != ACAMERA_OK) {
+      __android_log_print(ANDROID_LOG_ERROR, kTag,
+                          "could not apply fixed %dfps (result=%d); using auto",
+                          fixed_fps_, info_.fps_set_result);
+      fixed_fps_ = 0;
+      info_.applied_fps = 0;
+    }
   }
 
   {
@@ -746,12 +810,17 @@ bool CameraSource::Start(const CaptureConfig& config) {
   if (session_ != nullptr) return true;
 
   disconnected_.store(false);
-  fixed_fps_ = config.fixed_fps;
+  fixed_fps_ = 0;
 
   manager_ = ACameraManager_create();
   if (manager_ == nullptr) return false;
 
-  if (!SelectCamera(config) || !OpenReaders() || !OpenDevice() || !StartSession()) {
+  if (!SelectCamera(config)) {
+    Stop();
+    return false;
+  }
+  fixed_fps_ = info_.applied_fps;
+  if (!OpenReaders() || !OpenDevice() || !StartSession()) {
     Stop();
     return false;
   }
