@@ -16,6 +16,7 @@
 #include "capture_config.h"
 #include "device_status.h"
 #include "frame_motion.h"
+#include "frame_stall_detector.h"
 #include "imu_source.h"
 #include "input.h"
 #include "location.h"
@@ -84,6 +85,13 @@ struct AppState {
   PeriodicSchedule free_space_schedule{
       sensor_logger::kFreeSpaceCheckIntervalNs};
   int64_t last_timestamp_ns = 0;
+
+  // The camera can be throttled once the app is backgrounded even with the
+  // foreground service running, and that leaves no trace in the drop counters.
+  // The window is gone then, so the result is kept for the HUD to show on
+  // return.
+  bool in_background = false;
+  sensor_logger::FrameStallDetector frame_stall;
 
   // Same cadence as the free-space schedule, for the same reason: cheap enough
   // to poll often. Both schedules use CLOCK_BOOTTIME rather than camera frames,
@@ -390,6 +398,7 @@ void ToggleRecording(AppState* state) {
                             state->imu.info(), start_loc)) {
     StartRecordingService(state->app);
     state->stop_reason = nullptr;
+    state->frame_stall.Reset(sensor_logger::BoottimeNowNs());
     // So the first thermal sample lands promptly rather than waiting out
     // however much of the schedule was left over from a previous session.
     state->thermal_schedule.Reset();
@@ -790,6 +799,10 @@ std::vector<std::string> StatusLines(const AppState& state) {
                 (long long)(recorder.imu_samples() / 1000));
   lines.emplace_back(buffer);
 
+  if (state.frame_stall.stalled()) {
+    lines.emplace_back("BG CAPTURE STALLED");
+  }
+
   // Shown whether or not anything is recording — a long session (the
   // multi-hour static IMU-noise captures this app has been used for) is
   // exactly when battery is worth watching without leaving the app to check.
@@ -829,6 +842,7 @@ void HandleCommand(android_app* app, int32_t cmd) {
       break;
 
     case APP_CMD_PAUSE:
+      state->in_background = true;
       // If we are currently recording, the Foreground Service keeps camera & IMU
       // capture active in the background. Only stop capture if not recording.
       if (!state->recorder.is_recording()) {
@@ -836,10 +850,12 @@ void HandleCommand(android_app* app, int32_t cmd) {
       } else {
         state->recorder.RecordLifecycleEvent(state->last_timestamp_ns,
                                              "background");
+        state->frame_stall.OnFrame(sensor_logger::BoottimeNowNs());
       }
       break;
 
     case APP_CMD_RESUME:
+      state->in_background = false;
       if (state->display != EGL_NO_DISPLAY) StartCapture(state);
       if (state->recorder.is_recording()) {
         state->recorder.RecordLifecycleEvent(state->last_timestamp_ns,
@@ -936,12 +952,19 @@ extern "C" void android_main(android_app* app) {
       continue;
     }
 
+    if (state.recorder.is_recording() && state.in_background) {
+      const int32_t fps = state.camera.info().applied_fps;
+      state.frame_stall.Check(sensor_logger::BoottimeNowNs(),
+                              1'000'000'000LL / (fps > 0 ? fps : 30));
+    }
+
     state.camera.DrainResults(&capture_results);
     state.recorder.RecordCaptureResults(capture_results);
     if (!capture_results.empty()) state.last_result = capture_results.back();
 
     if (state.camera.AcquireFrame(&frame)) {
       state.last_timestamp_ns = frame.timestamp_ns;
+      state.frame_stall.OnFrame(sensor_logger::BoottimeNowNs());
       if (state.recorder.is_recording()) state.recorder.Record(frame);
     }
 
