@@ -217,10 +217,15 @@ bool SessionRecorder::Start(const std::string& root,
   considered_frames_ = 0;
   camera_completed_captures_ = 0;
   frames_without_image_ = 0;
+  index_write_failures_ = 0;
   imu_samples_ = 0;
   camera_timing_.Reset();
   accelerometer_timing_.Reset();
   gyroscope_timing_.Reset();
+
+  // Before anything is recorded: a session that dies without reaching Stop()
+  // still says what took it and with which settings.
+  WriteManifest(start_timestamp_ns, LocationData{}, /*complete=*/false);
 
   recording_ = true;
   return true;
@@ -440,13 +445,17 @@ void SessionRecorder::WriteFrame(PendingFrame& frame) {
     return;
   }
 
+  if (!WriteIndexRow(frame, filename)) {
+    ++index_write_failures_;
+    __android_log_print(ANDROID_LOG_ERROR, kTag,
+                        "frames.csv write failed for %s; the image is on disk "
+                        "but not indexed",
+                        filename.c_str());
+    return;
+  }
+
   ++written_frames_;
   written_bytes_ += static_cast<int64_t>(frame.pixels().size());
-
-  // Flushed per frame rather than at Stop(). A session that ends by the process
-  // being killed — which is how a backgrounded capture usually ends — would
-  // otherwise leave the images on disk with an empty index describing them.
-  frames_.flush();
 }
 
 bool SessionRecorder::WriteImage(const PendingFrame& frame,
@@ -463,8 +472,11 @@ bool SessionRecorder::WriteImage(const PendingFrame& frame,
   // fail at close() (e.g. ENOSPC surfacing only on the final flush) — indexing
   // the frame as written past this point would leave frames.csv pointing at a
   // truncated file that looks valid to any downstream reader.
-  if (!out) return false;
+  return static_cast<bool>(out);
+}
 
+bool SessionRecorder::WriteIndexRow(const PendingFrame& frame,
+                                    const std::string& filename) {
   frames_ << frame.timestamp_ns() << ',' << filename << ',' << frame.width()
           << ',' << frame.height() << ',' << frame.sharpness() << ','
           << ChromaLayoutName(frame.chroma_layout()) << ','
@@ -474,7 +486,14 @@ bool SessionRecorder::WriteImage(const PendingFrame& frame,
     frames_ << ',' << frame.segment_length(i);
   }
   frames_ << '\n';
-  return true;
+
+  // Flushed per frame rather than at Stop(). A session that ends by the process
+  // being killed — which is how a backgrounded capture usually ends — would
+  // otherwise leave the images on disk with an empty index describing them.
+  // The result is checked here for the same reason: a row the stream refused
+  // is not an indexed frame.
+  frames_.flush();
+  return frames_.good();
 }
 
 void SessionRecorder::Stop(const LocationData& end_location) {
@@ -500,14 +519,16 @@ void SessionRecorder::Stop(const LocationData& end_location) {
   thermal_.close();
   lifecycle_.close();
   motion_grid_.close();
-  WriteManifest(last_timestamp_ns_, end_location);
+  WriteManifest(last_timestamp_ns_, end_location, /*complete=*/true);
   recording_ = false;
 }
 
 void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
-                                     const LocationData& end_location) {
-  std::ofstream manifest(session_path_ + "/session.json",
-                         std::ios::out | std::ios::trunc);
+                                     const LocationData& end_location,
+                                     bool complete) {
+  const std::string manifest_path = session_path_ + "/session.json";
+  const std::string temp_path = manifest_path + ".tmp";
+  std::ofstream manifest(temp_path, std::ios::out | std::ios::trunc);
   if (!manifest.is_open()) return;
 
   const double duration_seconds =
@@ -539,6 +560,8 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
   // its camera and its sensors, and the format assumptions along with them, so
   // a capture that does not say what took it cannot be checked against another.
   manifest << "{\n"
+           << "  \"status\": \"" << (complete ? "complete" : "recording")
+           << "\",\n"
            << "  \"app_version_name\": \"" APP_VERSION_NAME "\",\n"
            << "  \"app_version_code\": " << APP_VERSION_CODE << ",\n"
            << "  \"device\": \""
@@ -554,10 +577,13 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << Escaped(SystemProperty("ro.build.version.release")) << "\",\n"
            << "  \"android_sdk\": "
            << SystemProperty("ro.build.version.sdk") << ",\n"
-           << "  \"start_timestamp_ns\": " << start_timestamp_ns_ << ",\n"
-           << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
-           << "  \"duration_seconds\": " << duration_seconds << ",\n"
-           << "  \"average_fps\": " << average_fps << ",\n"
+           << "  \"start_timestamp_ns\": " << start_timestamp_ns_ << ",\n";
+  if (complete) {
+    manifest << "  \"end_timestamp_ns\": " << end_timestamp_ns << ",\n"
+             << "  \"duration_seconds\": " << duration_seconds << ",\n"
+             << "  \"average_fps\": " << average_fps << ",\n";
+  }
+  manifest
            << "  \"camera_fps_requested\": " << camera_.requested_fps
            << ",\n"
            << "  \"camera_fps_applied\": " << camera_.applied_fps << ",\n"
@@ -589,6 +615,8 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << "  \"written_bytes\": " << written_bytes_.load() << ",\n"
            << "  \"considered_frames\": " << considered_frames_ << ",\n"
            << "  \"frames_without_image\": " << frames_without_image_.load()
+           << ",\n"
+           << "  \"index_write_failures\": " << index_write_failures_.load()
            << ",\n"
            << "  \"dropped_frames\": " << writer_.dropped() << ",\n"
            << "  \"camera_completed_captures\": " << camera_completed_captures_
@@ -666,7 +694,7 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
   }
 
   WriteLocationField(manifest, "start_location", start_location_);
-  WriteLocationField(manifest, "end_location", end_location);
+  if (complete) WriteLocationField(manifest, "end_location", end_location);
 
   manifest << "  \"stabilisation\": \"off, both optical and digital; either "
               "one changes the camera geometry between frames\",\n"
@@ -688,6 +716,9 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
               "ends when the picture shifts or stops matching\"\n"
            << "}\n";
   manifest.close();
+  if (manifest && std::rename(temp_path.c_str(), manifest_path.c_str()) != 0) {
+    manifest.setstate(std::ios::failbit);
+  }
   if (!manifest) {
     // Most likely to happen exactly when the disk filled up mid-session —
     // the one moment a corrupt/partial session.json is worst, since it is

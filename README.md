@@ -38,7 +38,7 @@ REC 0:57   36 MIN LEFT      elapsed, and how long the free space lasts
 SHIFT 2/12  DIFF 4/6        movement against the amount that keeps a photo
 4080X3060
 1/30 ISO247 0.91M           shutter, sensitivity, focus — held or still moving
-DROP 0 NOIMG 0 IMU 36K      DROP and NOIMG should be zero
+DROP 0 NOIMG 0 IDX 0 IMU 36K  DROP, NOIMG and IDX should be zero
 BATT 78% 32.1C              shown whether or not anything is recording
 
 [ LOCK ]
