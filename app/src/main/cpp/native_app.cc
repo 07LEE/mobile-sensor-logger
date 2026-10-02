@@ -792,10 +792,12 @@ std::vector<std::string> StatusLines(const AppState& state) {
   lines.emplace_back(buffer);
 
   // Anything but zero in the first two means the capture is outrunning the
-  // disk, which nothing else on screen would show.
-  std::snprintf(buffer, sizeof(buffer), "DROP %lld NOIMG %lld IMU %lldK",
+  // disk; in IDX, that frames.csv is missing rows for images that were saved.
+  // Nothing else on screen would show either.
+  std::snprintf(buffer, sizeof(buffer), "DROP %lld NOIMG %lld IDX %lld IMU %lldK",
                 (long long)recorder.dropped_frames(),
                 (long long)recorder.frames_without_image(),
+                (long long)recorder.index_write_failures(),
                 (long long)(recorder.imu_samples() / 1000));
   lines.emplace_back(buffer);
 

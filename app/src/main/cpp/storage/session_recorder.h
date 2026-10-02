@@ -106,6 +106,7 @@ class SessionRecorder {
   int64_t written_frames() const { return written_frames_; }
   int64_t considered_frames() const { return considered_frames_; }
   int64_t frames_without_image() const { return frames_without_image_; }
+  int64_t index_write_failures() const { return index_write_failures_; }
   int64_t dropped_frames() const { return writer_.dropped(); }
   int64_t imu_samples() const { return imu_samples_; }
 
@@ -169,10 +170,11 @@ class SessionRecorder {
   void ConfirmKeyframe(Candidate* winner, int64_t timestamp_ns);
 
   // Both run on the writer thread. Nothing else touches frames_,
-  // written_frames_ or frames_without_image_ while it is running, which is what
-  // keeps them free of locking.
+  // written_frames_, frames_without_image_ or index_write_failures_ while it is
+  // running, which is what keeps them free of locking.
   void WriteFrame(PendingFrame& frame);
   bool WriteImage(const PendingFrame& frame, const std::string& filename);
+  bool WriteIndexRow(const PendingFrame& frame, const std::string& filename);
 
   void WriteManifest(int64_t end_timestamp_ns,
                      const LocationData& end_location);
@@ -225,6 +227,10 @@ class SessionRecorder {
   std::atomic<int64_t> written_frames_{0};
   std::atomic<int64_t> written_bytes_{0};
   std::atomic<int64_t> frames_without_image_{0};
+  // Images that reached the disk but whose frames.csv row did not. Kept apart
+  // from frames_without_image_: the pixels are there, but nothing says how to
+  // read them.
+  std::atomic<int64_t> index_write_failures_{0};
   int64_t considered_frames_ = 0;
   int64_t camera_completed_captures_ = 0;
   int64_t imu_samples_ = 0;
