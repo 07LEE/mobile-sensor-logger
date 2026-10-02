@@ -176,8 +176,11 @@ class SessionRecorder {
   bool WriteImage(const PendingFrame& frame, const std::string& filename);
   bool WriteIndexRow(const PendingFrame& frame, const std::string& filename);
 
-  void WriteManifest(int64_t end_timestamp_ns,
-                     const LocationData& end_location);
+  // Written once at Start() with complete == false, for what is already known,
+  // and again at Stop() with the final values. Through a temporary file, so an
+  // update cut short leaves the earlier one in place.
+  void WriteManifest(int64_t end_timestamp_ns, const LocationData& end_location,
+                     bool complete);
 
   bool recording_ = false;
   std::string session_path_;

@@ -22,7 +22,7 @@ adb pull /sdcard/Android/data/com.sensor.logger/files/sessions data/
 | capture.csv | `timestamp_ns, exposure_ns, sensitivity, focus_diopters, rolling_shutter_skew_ns, ae_state, awb_state, af_state, fps_range_min, fps_range_max, physical_id` — one row per frame the camera finished |
 | thermal.csv | `timestamp_ns, thermal_status, battery_temp_c` — sampled on a two-second `CLOCK_BOOTTIME` schedule, not per frame; `timestamp_ns` is the query time and `thermal_status` is `-1` below API 29 |
 | lifecycle.csv | `timestamp_ns, event` — `event` is `background` or `foreground`, written on each transition while recording |
-| session.json | Which phone and camera it came from, counts, and units |
+| session.json | Which phone and camera it came from, counts, and units — written when recording starts and rewritten when it stops; `status` is `recording` until then, so a session that never reached a clean stop still has the start-time fields but no end time, duration, average frame rate or end location, and its counts are zero. A session without `status` was recorded by an earlier version and was stopped cleanly |
 
 Timestamps are nanoseconds, but their producer depends on the file. `frames.csv`, `candidates.csv` and `motion_grid.bin` use camera image timestamps; `capture.csv` uses camera capture-result timestamps; `imu.csv` uses sensor-event timestamps; `thermal.csv` uses the `CLOCK_BOOTTIME` query time; and `lifecycle.csv` records the most recent camera timestamp at each transition. Camera and IMU timestamps are directly comparable only when the camera reports a `REALTIME` timestamp source, which the manifest explains in `imu_note`.
 
