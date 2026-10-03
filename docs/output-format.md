@@ -59,6 +59,8 @@ For frame rate, `camera_fps_requested` is the numeric form of the configured `fp
 
 To get upright PNG or JPEG files instead, `./scripts/export_images.py <session_dir> [--out DIR] [--format png|jpg] [--limit N]` decodes every frame in frames.csv, applies `sensor_orientation`, and writes `<session_dir>/images/<timestamp_ns>.png` by default. It needs Python with `numpy` and `opencv-python`.
 
+For COLMAP, `./scripts/export_colmap.py <session_dir>` prints the `FULL_OPENCV` camera parameters and a `feature_extractor` command for those images. It rotates the session.json intrinsics the same way the images are rotated, and exits with a message when the session has no intrinsics or the frame is not a uniform scale of the active array.
+
 ### Replaying the selection rule
 
 candidates.csv records what the on-device run actually measured against the reference chain its own thresholds produced — sharpness (never threshold-dependent) alongside shift/residual (specific to that run). To ask what a different `min_shift`/`min_residual` would have kept, without reshooting, motion_grid.bin carries what those thresholds would need: the same downsampled luma grid `FrameMotion` computes internally for every scored frame, small enough (`grid_width * grid_height` bytes — 3072 at this project's usual 4:3 capture) to record unconditionally alongside candidates.csv.
