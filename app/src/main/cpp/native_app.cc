@@ -359,16 +359,18 @@ void ToggleRecording(AppState* state) {
     StopRecordingService(state->app);
     state->camera.UnlockExposureAndFocus();
     RevertExtrinsicModeIfActive(state);
+    const sensor_logger::UpstreamLossSnapshot upstream =
+        state->recorder.upstream_loss();
     __android_log_print(
         ANDROID_LOG_INFO, kTag,
         "stopped: %lld written, %lld considered, %lld dropped, %lld lost "
-        "upstream (of %lld camera captures)",
+        "upstream (of %lld camera captures, %lld outside the frame range)",
         (long long)state->recorder.written_frames(),
         (long long)state->recorder.considered_frames(),
         (long long)state->recorder.dropped_frames(),
-        (long long)(state->recorder.camera_completed_captures() -
-                    state->recorder.considered_frames()),
-        (long long)state->recorder.camera_completed_captures());
+        (long long)upstream.lost_in_range,
+        (long long)state->recorder.camera_completed_captures(),
+        (long long)upstream.results_outside_range);
     return;
   }
 

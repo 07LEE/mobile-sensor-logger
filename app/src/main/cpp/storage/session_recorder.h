@@ -18,6 +18,7 @@
 #include "pending_frame.h"
 #include "session_item.h"
 #include "timestamp_stats.h"
+#include "upstream_loss.h"
 
 namespace sensor_logger {
 
@@ -118,6 +119,12 @@ class SessionRecorder {
   // This can, because the metadata callback has nothing to fall behind on.
   int64_t camera_completed_captures() const {
     return camera_completed_captures_;
+  }
+
+  // Which of those captures never reached Record(), matched by timestamp, and
+  // how many fall outside the span of images recorded. See upstream_loss.h.
+  UpstreamLossSnapshot upstream_loss() const {
+    return upstream_loss_.Snapshot();
   }
 
   // Bytes of image written, and how long the session has been running by the
@@ -236,6 +243,7 @@ class SessionRecorder {
   std::atomic<int64_t> index_write_failures_{0};
   int64_t considered_frames_ = 0;
   int64_t camera_completed_captures_ = 0;
+  UpstreamLoss upstream_loss_;
   int64_t imu_samples_ = 0;
   TimestampStats camera_timing_;
   TimestampStats accelerometer_timing_;
