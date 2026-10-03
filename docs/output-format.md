@@ -57,6 +57,8 @@ For frame rate, `camera_fps_requested` is the numeric form of the configured `fp
 
 `imu_requested_interval_us` records the requested IMU interval. The nested `accelerometer` and `gyroscope` objects record whether each sensor was available, its name, vendor and minimum delay, the results returned when enabling it and setting its rate, and the delivered sample count, mean period, approximate median period, maximum gap and non-monotonic timestamp count. A successful rate request is not proof that the platform delivered that rate; the timing summary is the observed result.
 
+To get upright PNG or JPEG files instead, `./scripts/export_images.py <session_dir> [--out DIR] [--format png|jpg] [--limit N]` decodes every frame in frames.csv, applies `sensor_orientation`, and writes `<session_dir>/images/<timestamp_ns>.png` by default. It needs Python with `numpy` and `opencv-python`.
+
 ### Replaying the selection rule
 
 candidates.csv records what the on-device run actually measured against the reference chain its own thresholds produced — sharpness (never threshold-dependent) alongside shift/residual (specific to that run). To ask what a different `min_shift`/`min_residual` would have kept, without reshooting, motion_grid.bin carries what those thresholds would need: the same downsampled luma grid `FrameMotion` computes internally for every scored frame, small enough (`grid_width * grid_height` bytes — 3072 at this project's usual 4:3 capture) to record unconditionally alongside candidates.csv.
