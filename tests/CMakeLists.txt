@@ -82,3 +82,18 @@ target_compile_options(frame_stall_detector_tests PRIVATE
 )
 
 add_test(NAME frame_stall_detector_tests COMMAND frame_stall_detector_tests)
+
+add_executable(upstream_loss_tests
+    upstream_loss_tests.cc
+    ../app/src/main/cpp/pipeline/upstream_loss.cc
+)
+
+target_include_directories(upstream_loss_tests PRIVATE
+    ../app/src/main/cpp/pipeline
+)
+
+target_compile_options(upstream_loss_tests PRIVATE
+    -Wall -Wextra -Wpedantic -Werror
+)
+
+add_test(NAME upstream_loss_tests COMMAND upstream_loss_tests)
