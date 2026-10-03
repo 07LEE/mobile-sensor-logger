@@ -63,6 +63,8 @@ For COLMAP, `./scripts/export_colmap.py <session_dir>` prints the `FULL_OPENCV` 
 
 For Kalibr, `./scripts/export_rosbag.py <session_dir> [--out FILE.bag]` writes a ROS1 bag with upright mono8 images on `/cam0/image_raw` and accelerometer-interpolated gyroscope pairs on `/imu0`. It needs the `rosbags` Python package, and the bag is about the size of the luma planes, 12MB per frame at 4080x3060.
 
+`./scripts/export_camchain.py <session_dir> [--out FILE.yaml]` writes the matching Kalibr `camchain.yaml`, seeded with the session.json intrinsics rotated to the bag's upright images. Kalibr's pinhole-radtan model has no third radial term, so `k3` is dropped with a warning.
+
 ### Replaying the selection rule
 
 candidates.csv records what the on-device run actually measured against the reference chain its own thresholds produced — sharpness (never threshold-dependent) alongside shift/residual (specific to that run). To ask what a different `min_shift`/`min_residual` would have kept, without reshooting, motion_grid.bin carries what those thresholds would need: the same downsampled luma grid `FrameMotion` computes internally for every scored frame, small enough (`grid_width * grid_height` bytes — 3072 at this project's usual 4:3 capture) to record unconditionally alongside candidates.csv.

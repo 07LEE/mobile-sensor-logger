@@ -28,16 +28,13 @@ def rotate(fx, fy, cx, cy, p1, p2, width, height, degrees):
     raise ValueError(f"unsupported sensor_orientation: {degrees}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("session", type=Path)
-    args = parser.parse_args()
-
-    manifest = json.loads((args.session / "session.json").read_text())
+def upright_intrinsics(session):
+    """Return (width, height, fx, fy, cx, cy, k1, k2, k3, p1, p2) for the exported upright images."""
+    manifest = json.loads((session / "session.json").read_text())
     if not manifest.get("intrinsics"):
         sys.exit("session.json has no intrinsics; calibrate this camera first")
 
-    with open(args.session / "frames.csv", newline="") as f:
+    with open(session / "frames.csv", newline="") as f:
         first = next(csv.DictReader(f))
     width, height = int(first["width"]), int(first["height"])
 
@@ -58,6 +55,15 @@ def main():
     fx, fy, cx, cy, p1, p2, width, height = rotate(
         fx, fy, cx, cy, p1, p2, width, height, int(manifest.get("sensor_orientation", 0))
     )
+    return width, height, fx, fy, cx, cy, k1, k2, k3, p1, p2
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("session", type=Path)
+    args = parser.parse_args()
+
+    width, height, fx, fy, cx, cy, k1, k2, k3, p1, p2 = upright_intrinsics(args.session)
 
     # FULL_OPENCV is fx, fy, cx, cy, k1, k2, p1, p2, k3, k4, k5, k6.
     params = [fx, fy, cx, cy, k1, k2, p1, p2, k3, 0, 0, 0]
