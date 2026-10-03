@@ -216,6 +216,7 @@ bool SessionRecorder::Start(const std::string& root,
   written_bytes_ = 0;
   considered_frames_ = 0;
   camera_completed_captures_ = 0;
+  upstream_loss_.Reset();
   frames_without_image_ = 0;
   index_write_failures_ = 0;
   imu_samples_ = 0;
@@ -235,6 +236,7 @@ void SessionRecorder::Record(const FrameData& frame) {
   if (!recording_) return;
 
   last_timestamp_ns_ = frame.timestamp_ns;
+  upstream_loss_.ObserveImage(frame.timestamp_ns);
 
   if (!frame.image.valid) {
     ++frames_without_image_;
@@ -363,6 +365,7 @@ void SessionRecorder::RecordCaptureResults(
     camera_completed_captures_ += static_cast<int64_t>(results.size());
     for (const CaptureResult& result : results) {
       camera_timing_.Observe(result.timestamp_ns);
+      upstream_loss_.ObserveResult(result.timestamp_ns);
     }
   } else {
     __android_log_print(ANDROID_LOG_ERROR, kTag,
@@ -537,6 +540,7 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
           : 0.0;
   const double average_fps =
       (duration_seconds > 0.0) ? (considered_frames_ / duration_seconds) : 0.0;
+  const UpstreamLossSnapshot upstream = upstream_loss_.Snapshot();
   const TimestampStatsSnapshot accelerometer_timing =
       accelerometer_timing_.Snapshot();
   const TimestampStatsSnapshot gyroscope_timing =
@@ -621,12 +625,14 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << "  \"dropped_frames\": " << writer_.dropped() << ",\n"
            << "  \"camera_completed_captures\": " << camera_completed_captures_
            << ",\n"
-           << "  \"frames_lost_upstream\": "
-           << (camera_completed_captures_ - considered_frames_) << ",\n"
-           << "  \"frames_lost_upstream_note\": \"captures the camera "
-              "finished but Record() never saw, because AcquireFrame kept a "
-              "newer image instead; not counted by dropped_frames, which is "
-              "the writer queue only\",\n"
+           << "  \"frames_lost_upstream\": " << upstream.lost_in_range << ",\n"
+           << "  \"frames_lost_upstream_note\": \"capture results between "
+              "the first and last recorded image that have no image with the "
+              "same timestamp: frames the camera finished and AcquireFrame "
+              "replaced with a newer one; not counted by dropped_frames, "
+              "which is the writer queue only\",\n"
+           << "  \"capture_results_outside_frame_range\": "
+           << upstream.results_outside_range << ",\n"
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
            << "  \"imu_requested_interval_us\": "
            << imu_info_.requested_interval_us << ",\n";
