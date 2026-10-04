@@ -20,6 +20,8 @@ See the [build and install guide](docs/building.md) for building the app. The sa
 ./scripts/test_sampling.sh
 ```
 
+The export scripts have Python tests, run with `python3 -m pytest tests`.
+
 Say in the pull request what you ran and, for a change to capture or recording, which device you checked it on. Recording behavior differs between phones, so a device name is worth including.
 
 ## Commit messages and pull request titles
