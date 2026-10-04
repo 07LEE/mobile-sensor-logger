@@ -128,6 +128,8 @@ void CameraSource::OnCaptureCompleted(void* context, ACameraCaptureSession*,
   out.ae_state = ReadU8(result, ACAMERA_CONTROL_AE_STATE);
   out.awb_state = ReadU8(result, ACAMERA_CONTROL_AWB_STATE);
   out.af_state = ReadU8(result, ACAMERA_CONTROL_AF_STATE);
+  out.distortion_correction_mode =
+      ReadU8(result, ACAMERA_DISTORTION_CORRECTION_MODE);
 
   if (ACameraMetadata_getConstEntry(result, ACAMERA_CONTROL_AE_TARGET_FPS_RANGE,
                                     &entry) == ACAMERA_OK &&
@@ -341,6 +343,16 @@ bool CameraSource::ReadCamera(const char* id, ACameraMetadata* characteristics,
       if (entry.data.u8[i] ==
           ACAMERA_REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA) {
         out->logical_multi_camera = true;
+      }
+    }
+  }
+
+  if (ACameraMetadata_getConstEntry(
+          characteristics, ACAMERA_DISTORTION_CORRECTION_AVAILABLE_MODES,
+          &entry) == ACAMERA_OK) {
+    for (uint32_t i = 0; i < entry.count; ++i) {
+      if (entry.data.u8[i] == ACAMERA_DISTORTION_CORRECTION_MODE_OFF) {
+        out->distortion_correction_off_available = true;
       }
     }
   }
@@ -738,6 +750,27 @@ bool CameraSource::StartSession() {
       ACAMERA_LENS_OPTICAL_STABILIZATION_MODE_OFF;
   ACaptureRequest_setEntry_u8(request_, ACAMERA_LENS_OPTICAL_STABILIZATION_MODE,
                               1, &optical_stabilization);
+
+  // Distortion correction off. The recorded intrinsics and distortion are the
+  // pre-correction ones, and YUV is a processed output that the platform may
+  // correct unless told not to, which would leave the frames in a geometry
+  // those numbers do not describe. A device that does not list OFF is left
+  // alone and recorded as unavailable; that says the standard control is
+  // missing, not that the device leaves the frames uncorrected (the Galaxy Z
+  // Flip4 lists no standard modes and exposes a vendor tag instead).
+  if (info_.distortion_correction_off_available) {
+    const uint8_t distortion_correction =
+        ACAMERA_DISTORTION_CORRECTION_MODE_OFF;
+    info_.distortion_correction_set_result = ACaptureRequest_setEntry_u8(
+        request_, ACAMERA_DISTORTION_CORRECTION_MODE, 1,
+        &distortion_correction);
+    if (info_.distortion_correction_set_result != ACAMERA_OK) {
+      __android_log_print(ANDROID_LOG_ERROR, kTag,
+                          "could not turn distortion correction off "
+                          "(result=%d)",
+                          info_.distortion_correction_set_result);
+    }
+  }
 
   // Left alone, TEMPLATE_PREVIEW's default target range is flexible enough to
   // run below the sensor's ceiling in a dim room, which makes the frame count

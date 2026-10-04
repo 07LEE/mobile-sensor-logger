@@ -184,7 +184,8 @@ bool SessionRecorder::Start(const std::string& root,
   candidates_ << "timestamp_ns,sharpness,shift,residual\n";
   capture_ << "timestamp_ns,exposure_ns,sensitivity,focus_diopters,"
               "rolling_shutter_skew_ns,ae_state,awb_state,af_state,"
-              "fps_range_min,fps_range_max,physical_id\n";
+              "fps_range_min,fps_range_max,physical_id,"
+              "distortion_correction_mode\n";
   thermal_ << "timestamp_ns,thermal_status,battery_temp_c\n";
   lifecycle_ << "timestamp_ns,event\n";
 
@@ -358,7 +359,8 @@ void SessionRecorder::RecordCaptureResults(
              << result.rolling_shutter_skew_ns << ',' << result.ae_state << ','
              << result.awb_state << ',' << result.af_state << ','
              << result.fps_range_min << ',' << result.fps_range_max << ','
-             << result.physical_id << '\n';
+             << result.physical_id << ','
+             << result.distortion_correction_mode << '\n';
   }
   capture_.flush();
   if (capture_.good()) {
@@ -595,6 +597,11 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << (camera_.fps_request_supported ? "true" : "false") << ",\n"
            << "  \"camera_fps_set_result\": " << camera_.fps_set_result
            << ",\n"
+           << "  \"camera_distortion_correction_off_available\": "
+           << (camera_.distortion_correction_off_available ? "true" : "false")
+           << ",\n"
+           << "  \"camera_distortion_correction_set_result\": "
+           << camera_.distortion_correction_set_result << ",\n"
            << "  \"camera_fixed_fps_range_available\": "
            << (camera_.fixed_fps_range_available ? "true" : "false")
            << ",\n"
