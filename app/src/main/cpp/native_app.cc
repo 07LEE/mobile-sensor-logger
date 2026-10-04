@@ -466,6 +466,9 @@ void NextLens(AppState* state) {
     state->capturing = false;
     return;
   }
+  // Saved only once the lens has opened: a lens that fails to start must not
+  // be written to capture.conf, or the next launch would try it again.
+  state->config.Save(FilesRoot(state->app));
   state->last_timestamp_ns = 0;
 }
 

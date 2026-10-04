@@ -24,7 +24,7 @@ Say in the pull request what you ran and, for a change to capture or recording, 
 
 ## Commit messages and pull request titles
 
-Use a type prefix, then a lowercase imperative subject of at most 50 characters with no trailing period, for example `fix: count only indexed frames as saved`. The types are feat, fix, docs, style, refactor, test and chore. Add a one-line body that says why the change is needed.
+Use a type prefix, then a lowercase imperative subject with no trailing period, for example `fix: count only indexed frames as saved`. The types are feat, fix, docs, style, refactor, test and chore. Add a one-line body that says why the change is needed.
 
 External pull requests are squash merged, so the pull request title becomes the commit subject. Write it in the same format.
 
