@@ -67,11 +67,19 @@ def test_warns_when_distortion_correction_could_not_be_turned_off(tmp_path):
     assert "could not turn distortion correction off" in run(tmp_path).stderr
 
 
-@pytest.mark.parametrize("off_available, set_result", [(True, 0), (False, -1)])
-def test_no_warning_when_geometry_matches_the_intrinsics(tmp_path, off_available, set_result):
+def test_warns_when_device_does_not_offer_distortion_correction_off(tmp_path):
     write_session(
         tmp_path,
-        camera_distortion_correction_off_available=off_available,
-        camera_distortion_correction_set_result=set_result,
+        camera_distortion_correction_off_available=False,
+        camera_distortion_correction_set_result=-1,
+    )
+    assert "does not offer distortion correction OFF" in run(tmp_path).stderr
+
+
+def test_no_warning_when_distortion_correction_was_turned_off(tmp_path):
+    write_session(
+        tmp_path,
+        camera_distortion_correction_off_available=True,
+        camera_distortion_correction_set_result=0,
     )
     assert "distortion correction" not in run(tmp_path).stderr

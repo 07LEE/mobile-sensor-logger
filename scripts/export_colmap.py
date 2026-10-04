@@ -31,9 +31,9 @@ def rotate(fx, fy, cx, cy, p1, p2, width, height, degrees):
 def warn_if_geometry_unconfirmed(manifest):
     """Say so when the frames may not have the geometry the intrinsics describe.
 
-    The intrinsics are pre-correction. They fit the frames when the app turned
-    distortion correction off. When the device does not offer OFF the state is
-    unknown, and this does not warn for it yet.
+    The intrinsics are pre-correction. They fit the frames only when the app
+    turned distortion correction off. A device that does not list OFF may still
+    correct its YUV output through a control the app does not use.
     """
     off_available = manifest.get("camera_distortion_correction_off_available")
     if off_available is None:
@@ -42,7 +42,13 @@ def warn_if_geometry_unconfirmed(manifest):
             "so the intrinsics may not match the frames",
             file=sys.stderr,
         )
-    elif off_available and manifest.get("camera_distortion_correction_set_result") != 0:
+    elif not off_available:
+        print(
+            "warning: this device does not offer distortion correction OFF, so it is not known "
+            "whether the frames were corrected and the intrinsics may not match them",
+            file=sys.stderr,
+        )
+    elif manifest.get("camera_distortion_correction_set_result") != 0:
         print(
             "warning: the app could not turn distortion correction off "
             f"(result {manifest.get('camera_distortion_correction_set_result')}), "
