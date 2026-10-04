@@ -25,6 +25,7 @@ add_library(sensor_logger SHARED
     pipeline/pending_frame.cc
     pipeline/sharpness.cc
     pipeline/timestamp_stats.cc
+    pipeline/upstream_loss.cc
     ui/gl_quad.cc
     ui/preview_renderer.cc
     ui/ui_button.cc

@@ -47,6 +47,10 @@ struct CaptureResult {
   // the number.
   int64_t rolling_shutter_skew_ns = 0;
   std::string physical_id;  // empty unless the camera is logical
+
+  // The distortion correction mode the platform reports it applied (0 off,
+  // 1 fast, 2 high quality), -1 when the device does not report one.
+  int32_t distortion_correction_mode = -1;
 };
 
 // The rear camera, opened directly through the NDK.

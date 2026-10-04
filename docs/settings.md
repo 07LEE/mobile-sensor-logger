@@ -21,7 +21,7 @@ fps       = auto | 30           # pins the frame rate instead of letting AE pick
 adb push capture.conf /sdcard/Android/data/com.sensor.logger/files/
 ```
 
-`shutter`, `fps`, `mains`, `shift` and `residual` can also be changed in the PRO panel, and each change is written back to this file for the next recording. `shift` accepts values greater than `0` and below `0.15625`; `residual` accepts values greater than `0` and below `1.0`. The panel offers a smaller preset list around the defaults. `capture` is file-only. Retention has its own toolbar button and is saved to the file; Lens has its own toolbar button but a lens selected there applies only until the app restarts unless `capture.conf` is also updated.
+`shutter`, `fps`, `mains`, `shift` and `residual` can also be changed in the PRO panel, and each change is written back to this file for the next recording. `shift` accepts values greater than `0` and below `0.15625`; `residual` accepts values greater than `0` and below `1.0`. The panel offers a smaller preset list around the defaults. `capture` is file-only. Retention and Lens each have their own toolbar button and are saved to the file; a lens that fails to start is not saved.
 
 Every rear camera is logged at startup with its focal length, so `lens` can name one by id. On a Galaxy S25 Ultra two are offered: `0` at 6.3mm and `2` at 2.2mm.
 
@@ -75,6 +75,6 @@ A frame at full resolution is around 19MB, and a session writes two or three a s
 
 `dropped_frames` in session.json counts frames the writer's queue could not keep up with. It should be zero. A run of drops means the capture is asking for more than the device can write.
 
-`frames_lost_upstream` is currently calculated as `camera_completed_captures - considered_frames`. A positive value can indicate images superseded in the reader before `Record` saw them, but it can also include capture-result/image asymmetry at the recording boundary. Treat it as a signal to inspect the timestamps rather than as an exact loss count until that boundary accounting is separated.
+`frames_lost_upstream` counts capture results between the first and last recorded image that have no image with the same timestamp: frames the camera finished and the reader replaced with a newer one before the recorder took it. A session that loses nothing reports zero. `capture_results_outside_frame_range` counts results before the first or after the last image; recording starts and stops between a result and its image, so a few of these are expected and are not loss. Sessions recorded by 0.2.0 or earlier computed `frames_lost_upstream` as `camera_completed_captures - considered_frames`, which includes those boundary results.
 
 Recording stops on its own with 2GB left, and the readout says `STOPPED - DISK FULL`. That margin exists because a session that runs the disk to the last byte cannot write its own manifest — the settings, the counts and the calibration go with it — so a capture that filled a phone ends up unusable anyway. Sessions are never deleted; clearing them is a manual job.

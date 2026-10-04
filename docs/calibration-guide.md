@@ -70,6 +70,8 @@ Do not patch a shared device value directly into every session unless the lens, 
 
 Visual-inertial reconstruction additionally needs the rigid transform between the camera and IMU plus their time offset. Camera intrinsics describe rays inside one camera; they contain neither of those quantities.
 
+The time offset is not zero even when the camera timestamp source is `REALTIME`. On the tested Galaxy S25 Ultra ultrawide it was about 13ms with a 16.67ms exposure, which at the angular rate of a handheld capture is a visible rotation between an image and the gyroscope. See [output-format.md](output-format.md#inertial-data) for how it relates to exposure and rolling shutter.
+
 Use an AprilGrid target with Kalibr for the final camera-IMU calibration. A plain checkerboard remains useful for intrinsics, but its rotational symmetry can reverse corner ordering between views and invalidate a camera-IMU solve. AprilGrid tags carry unique IDs, removing that ambiguity.
 
 During the AprilGrid capture, keep the target stationary and visible while moving the phone through rotations and translations that excite all six IMU axes. Use `retention=all`; sampling only the sharpest keyframes removes the dense camera timing that camera-IMU calibration needs.

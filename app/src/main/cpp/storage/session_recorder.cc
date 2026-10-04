@@ -184,7 +184,8 @@ bool SessionRecorder::Start(const std::string& root,
   candidates_ << "timestamp_ns,sharpness,shift,residual\n";
   capture_ << "timestamp_ns,exposure_ns,sensitivity,focus_diopters,"
               "rolling_shutter_skew_ns,ae_state,awb_state,af_state,"
-              "fps_range_min,fps_range_max,physical_id\n";
+              "fps_range_min,fps_range_max,physical_id,"
+              "distortion_correction_mode\n";
   thermal_ << "timestamp_ns,thermal_status,battery_temp_c\n";
   lifecycle_ << "timestamp_ns,event\n";
 
@@ -216,6 +217,7 @@ bool SessionRecorder::Start(const std::string& root,
   written_bytes_ = 0;
   considered_frames_ = 0;
   camera_completed_captures_ = 0;
+  upstream_loss_.Reset();
   frames_without_image_ = 0;
   index_write_failures_ = 0;
   imu_samples_ = 0;
@@ -235,6 +237,7 @@ void SessionRecorder::Record(const FrameData& frame) {
   if (!recording_) return;
 
   last_timestamp_ns_ = frame.timestamp_ns;
+  upstream_loss_.ObserveImage(frame.timestamp_ns);
 
   if (!frame.image.valid) {
     ++frames_without_image_;
@@ -356,13 +359,15 @@ void SessionRecorder::RecordCaptureResults(
              << result.rolling_shutter_skew_ns << ',' << result.ae_state << ','
              << result.awb_state << ',' << result.af_state << ','
              << result.fps_range_min << ',' << result.fps_range_max << ','
-             << result.physical_id << '\n';
+             << result.physical_id << ','
+             << result.distortion_correction_mode << '\n';
   }
   capture_.flush();
   if (capture_.good()) {
     camera_completed_captures_ += static_cast<int64_t>(results.size());
     for (const CaptureResult& result : results) {
       camera_timing_.Observe(result.timestamp_ns);
+      upstream_loss_.ObserveResult(result.timestamp_ns);
     }
   } else {
     __android_log_print(ANDROID_LOG_ERROR, kTag,
@@ -537,6 +542,7 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
           : 0.0;
   const double average_fps =
       (duration_seconds > 0.0) ? (considered_frames_ / duration_seconds) : 0.0;
+  const UpstreamLossSnapshot upstream = upstream_loss_.Snapshot();
   const TimestampStatsSnapshot accelerometer_timing =
       accelerometer_timing_.Snapshot();
   const TimestampStatsSnapshot gyroscope_timing =
@@ -591,6 +597,11 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << (camera_.fps_request_supported ? "true" : "false") << ",\n"
            << "  \"camera_fps_set_result\": " << camera_.fps_set_result
            << ",\n"
+           << "  \"camera_distortion_correction_off_available\": "
+           << (camera_.distortion_correction_off_available ? "true" : "false")
+           << ",\n"
+           << "  \"camera_distortion_correction_set_result\": "
+           << camera_.distortion_correction_set_result << ",\n"
            << "  \"camera_fixed_fps_range_available\": "
            << (camera_.fixed_fps_range_available ? "true" : "false")
            << ",\n"
@@ -621,12 +632,14 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
            << "  \"dropped_frames\": " << writer_.dropped() << ",\n"
            << "  \"camera_completed_captures\": " << camera_completed_captures_
            << ",\n"
-           << "  \"frames_lost_upstream\": "
-           << (camera_completed_captures_ - considered_frames_) << ",\n"
-           << "  \"frames_lost_upstream_note\": \"captures the camera "
-              "finished but Record() never saw, because AcquireFrame kept a "
-              "newer image instead; not counted by dropped_frames, which is "
-              "the writer queue only\",\n"
+           << "  \"frames_lost_upstream\": " << upstream.lost_in_range << ",\n"
+           << "  \"frames_lost_upstream_note\": \"capture results between "
+              "the first and last recorded image that have no image with the "
+              "same timestamp: frames the camera finished and AcquireFrame "
+              "replaced with a newer one; not counted by dropped_frames, "
+              "which is the writer queue only\",\n"
+           << "  \"capture_results_outside_frame_range\": "
+           << upstream.results_outside_range << ",\n"
            << "  \"imu_samples\": " << imu_samples_ << ",\n"
            << "  \"imu_requested_interval_us\": "
            << imu_info_.requested_interval_us << ",\n";
@@ -707,7 +720,12 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
               "sensor reads them\",\n"
            << "  \"imu_note\": \"m/s^2 and rad/s in the device frame"
            << (camera_.timestamps_realtime
-                   ? ", on the same clock as the frame timestamps\",\n"
+                   ? ", on the same clock as the frame timestamps, which "
+                     "makes them comparable and not aligned: a frame "
+                     "timestamp is the start of exposure, so the image is "
+                     "centred later by about exposure_ns/2 + "
+                     "rolling_shutter_skew_ns/2 from capture.csv, and a "
+                     "device-specific offset remains to be estimated\",\n"
                    : "; this camera's timestamp source is NOT realtime, so "
                      "frame and IMU timestamps are not on the same clock\",\n")
            << "  \"sharpness_metric\": \"variance of Laplacian on luma, "
