@@ -456,6 +456,7 @@ void NextLens(AppState* state) {
 
   state->config.lens = sensor_logger::Lens::kExplicit;
   state->config.lens_id = state->camera.NextRearCameraId(current);
+  state->config.Save(FilesRoot(state->app));
 
   if (!state->camera.Start(state->config)) {
     LogError("could not switch lens");
