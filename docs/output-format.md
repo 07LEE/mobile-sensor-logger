@@ -100,6 +100,8 @@ Accelerometer and gyroscope at a requested 200Hz, unfiltered, one row per sample
 Whether the camera shares their clock is not a given.
 `ACAMERA_SENSOR_INFO_TIMESTAMP_SOURCE` says, and it is logged at startup — when it is not `REALTIME` the two streams cannot be aligned at all.
 
+A shared clock makes the timestamps comparable, not aligned. A frame timestamp marks the start of exposure of the first row, so the image is centred later than its timestamp by about `exposure_ns / 2 + rolling_shutter_skew_ns / 2`, both of which capture.csv records per frame. On the Galaxy S25 Ultra ultrawide, two Kalibr camera-IMU runs on sessions with a 16.67ms exposure and 8.61ms skew estimated `t_imu = t_cam + shift` with a shift of 13.20ms and 13.16ms; the formula gives 12.64ms, which agrees to about half a millisecond. Both sessions used the same exposure, so whether the shift follows the exposure has not been separated, and the remaining half millisecond is unexplained. Another Kalibr run on the same device with the equidistant camera model estimated 12.31ms, so the model alone moves the result by about a millisecond. Only one device has been measured; the offset has to be estimated per device and per exposure setting before the streams are treated as aligned.
+
 ### Exposure, white balance and focus are held
 
 A reconstruction solves one camera across a whole session. Autofocus moves the effective focal length as it hunts, and auto exposure and white balance move the brightness and the colour, so all three break that assumption frame by frame.
