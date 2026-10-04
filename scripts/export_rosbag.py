@@ -6,6 +6,9 @@ Usage: export_rosbag.py <session_dir> [--out FILE.bag]
 Images go to /cam0/image_raw as upright mono8 (the luma plane, rotated the same
 way export_images.py rotates). The accelerometer is interpolated onto each
 gyroscope sample and the pairs go to /imu0 as sensor_msgs/Imu.
+
+A session is refused, before any bag is written, when the camera and IMU
+timestamps are not on one clock or when either IMU stream is missing.
 """
 
 import argparse
@@ -21,6 +24,10 @@ from rosbags.typesys import Stores, get_typestore
 
 from export_images import ROTATIONS, read_plane
 
+# Marker the recorder writes into imu_note when the camera timestamp source is
+# not REALTIME (session_recorder.cc); older sessions carry no separate field.
+NOT_SAME_CLOCK = "NOT realtime"
+
 store = get_typestore(Stores.ROS1_NOETIC)
 Header = store.types["std_msgs/msg/Header"]
 Time = store.types["builtin_interfaces/msg/Time"]
@@ -35,18 +42,41 @@ def header(timestamp_ns, seq, frame_id):
 
 
 def paired_imu(path):
-    """Yield (timestamp_ns, gyro, accel) with accel interpolated onto each gyro sample."""
+    """Return [(timestamp_ns, gyro, accel)] with accel interpolated onto each gyro sample.
+
+    Exits with an explanation when the session cannot produce a Kalibr IMU stream.
+    """
     gyro, accel = [], []
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
             sample = (int(row["timestamp_ns"]), float(row["x"]), float(row["y"]), float(row["z"]))
             (gyro if row["sensor"] == "gyro" else accel).append(sample)
+    missing = [name for name, samples in (("gyroscope", gyro), ("accelerometer", accel)) if not samples]
+    if missing:
+        sys.exit(f"error: imu.csv has no {' or '.join(missing)} samples; Kalibr needs both streams")
+    if len(accel) < 2:
+        sys.exit("error: imu.csv has one accelerometer sample; at least two are needed to interpolate onto the gyroscope")
     accel = np.array(accel)
+    pairs = []
     for t, *g in gyro:
         if t < accel[0, 0] or t > accel[-1, 0]:
             continue
         a = [np.interp(t, accel[:, 0], accel[:, axis]) for axis in (1, 2, 3)]
-        yield t, g, a
+        pairs.append((t, g, a))
+    if not pairs:
+        sys.exit("error: no gyroscope sample falls inside the accelerometer time range, so nothing can be paired")
+    return pairs
+
+
+def require_shared_clock(manifest):
+    """Exit when session.json says the frame and IMU timestamps are not on one clock."""
+    note = manifest.get("imu_note") or ""
+    if NOT_SAME_CLOCK in note:
+        sys.exit(
+            "error: this camera's timestamp source is not REALTIME, so frame and IMU timestamps are "
+            "not on the same clock and the session cannot be used directly for Kalibr camera-IMU "
+            f"calibration (imu_note: {note})"
+        )
 
 
 def main():
@@ -57,10 +87,13 @@ def main():
 
     manifest = json.loads((args.session / "session.json").read_text())
     rotation = ROTATIONS.get(int(manifest.get("sensor_orientation", 0)))
+    require_shared_clock(manifest)
+    pairs = paired_imu(args.session / "imu.csv")
+    print(f"imu_note: {manifest.get('imu_note')}", file=sys.stderr)
+
     out = args.out or args.session / f"{args.session.name}.bag"
     if out.exists():
         out.unlink()
-    print(f"imu_note: {manifest.get('imu_note')}", file=sys.stderr)
 
     with open(args.session / "frames.csv", newline="") as f:
         rows = list(csv.DictReader(f))
@@ -90,8 +123,7 @@ def main():
             print(f"\rimages {seq + 1}/{len(rows)}", end="", file=sys.stderr)
         print(file=sys.stderr)
 
-        count = 0
-        for t, g, a in paired_imu(args.session / "imu.csv"):
+        for count, (t, g, a) in enumerate(pairs):
             msg = Imu(
                 header=header(t, count, "imu0"),
                 orientation=Quaternion(x=0.0, y=0.0, z=0.0, w=0.0),
@@ -102,8 +134,7 @@ def main():
                 linear_acceleration_covariance=np.zeros(9),
             )
             bag.write(imu_conn, t, store.serialize_ros1(msg, Imu.__msgtype__))
-            count += 1
-    print(f"{len(rows)} images, {count} imu samples in {out}", file=sys.stderr)
+    print(f"{len(rows)} images, {len(pairs)} imu samples in {out}", file=sys.stderr)
 
 
 if __name__ == "__main__":

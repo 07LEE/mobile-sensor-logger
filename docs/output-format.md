@@ -61,7 +61,7 @@ To get upright PNG or JPEG files instead, `./scripts/export_images.py <session_d
 
 For COLMAP, `./scripts/export_colmap.py <session_dir>` prints the `FULL_OPENCV` camera parameters and a `feature_extractor` command for those images. It rotates the session.json intrinsics the same way the images are rotated, and exits with a message when the session has no intrinsics or the frame is not a uniform scale of the active array.
 
-For Kalibr, `./scripts/export_rosbag.py <session_dir> [--out FILE.bag]` writes a ROS1 bag with upright mono8 images on `/cam0/image_raw` and accelerometer-interpolated gyroscope pairs on `/imu0`. It needs the `rosbags` Python package, and the bag is about the size of the luma planes, 12MB per frame at 4080x3060.
+For Kalibr, `./scripts/export_rosbag.py <session_dir> [--out FILE.bag]` writes a ROS1 bag with upright mono8 images on `/cam0/image_raw` and accelerometer-interpolated gyroscope pairs on `/imu0`. It needs the `rosbags` Python package, and the bag is about the size of the luma planes, 12MB per frame at 4080x3060. The script refuses a session, before writing a bag, when `imu_note` says the camera timestamps are not on the IMU clock or when `imu.csv` lacks accelerometer or gyroscope samples.
 
 `./scripts/export_camchain.py <session_dir> [--out FILE.yaml]` writes the matching Kalibr `camchain.yaml`, seeded with the session.json intrinsics rotated to the bag's upright images. Kalibr's pinhole-radtan model has no third radial term, so `k3` is dropped with a warning.
 
