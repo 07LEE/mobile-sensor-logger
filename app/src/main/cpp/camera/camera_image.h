@@ -56,7 +56,8 @@ struct CameraInfo {
   // a device that corrects it by default hands over frames whose geometry is
   // not the pre-correction geometry that `intrinsics` and `distortion` describe.
   // The set result is -1 when no request was made because the device does not
-  // offer OFF.
+  // list OFF. That does not show the device leaves frames uncorrected: some
+  // devices control correction through a vendor tag the app does not use.
   bool distortion_correction_off_available = false;
   int32_t distortion_correction_set_result = -1;
 

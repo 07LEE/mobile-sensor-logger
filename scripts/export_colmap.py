@@ -32,7 +32,8 @@ def warn_if_geometry_unconfirmed(manifest):
     """Say so when the frames may not have the geometry the intrinsics describe.
 
     The intrinsics are pre-correction. They fit the frames when the app turned
-    distortion correction off, or when the device does not offer it at all.
+    distortion correction off. When the device does not offer OFF the state is
+    unknown, and this does not warn for it yet.
     """
     off_available = manifest.get("camera_distortion_correction_off_available")
     if off_available is None:

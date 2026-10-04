@@ -754,8 +754,10 @@ bool CameraSource::StartSession() {
   // Distortion correction off. The recorded intrinsics and distortion are the
   // pre-correction ones, and YUV is a processed output that the platform may
   // correct unless told not to, which would leave the frames in a geometry
-  // those numbers do not describe. A device that does not offer OFF does not
-  // correct either, so it is left alone and recorded as unavailable.
+  // those numbers do not describe. A device that does not list OFF is left
+  // alone and recorded as unavailable; that says the standard control is
+  // missing, not that the device leaves the frames uncorrected (the Galaxy Z
+  // Flip4 lists no standard modes and exposes a vendor tag instead).
   if (info_.distortion_correction_off_available) {
     const uint8_t distortion_correction =
         ACAMERA_DISTORTION_CORRECTION_MODE_OFF;
