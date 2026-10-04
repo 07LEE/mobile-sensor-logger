@@ -456,7 +456,6 @@ void NextLens(AppState* state) {
 
   state->config.lens = sensor_logger::Lens::kExplicit;
   state->config.lens_id = state->camera.NextRearCameraId(current);
-  state->config.Save(FilesRoot(state->app));
 
   if (!state->camera.Start(state->config)) {
     LogError("could not switch lens");
@@ -467,6 +466,9 @@ void NextLens(AppState* state) {
     state->capturing = false;
     return;
   }
+  // Saved only once the lens has opened: a lens that fails to start must not
+  // be written to capture.conf, or the next launch would try it again.
+  state->config.Save(FilesRoot(state->app));
   state->last_timestamp_ns = 0;
 }
 
