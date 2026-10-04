@@ -63,7 +63,7 @@ For COLMAP, `./scripts/export_colmap.py <session_dir>` prints the `FULL_OPENCV` 
 
 For Kalibr, `./scripts/export_rosbag.py <session_dir> [--out FILE.bag]` writes a ROS1 bag with upright mono8 images on `/cam0/image_raw` and accelerometer-interpolated gyroscope pairs on `/imu0`. It needs the `rosbags` Python package, and the bag is about the size of the luma planes, 12MB per frame at 4080x3060.
 
-`./scripts/export_camchain.py <session_dir> [--out FILE.yaml]` writes the matching Kalibr `camchain.yaml`, seeded with the session.json intrinsics rotated to the bag's upright images. Kalibr's pinhole-radtan model has no third radial term, so `k3` is dropped with a warning.
+`./scripts/export_camchain.py <session_dir> [--out FILE.yaml]` writes the matching Kalibr `camchain.yaml`, seeded with the session.json intrinsics rotated to the bag's upright images. Kalibr's pinhole-radtan model has no third radial term, so `k3` is dropped with a warning. The principal point is moved half a pixel on each axis, because Camera2 puts the center of pixel (x, y) at (x + 0.5, y + 0.5) while Kalibr counts integer coordinates as pixel centers.
 
 ### Replaying the selection rule
 
