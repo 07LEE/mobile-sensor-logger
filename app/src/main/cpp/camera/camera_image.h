@@ -51,6 +51,15 @@ struct CameraInfo {
   bool fixed_fps_range_available = false;
   int32_t fps_set_result = -1;
 
+  // Whether the device lets the app choose Camera2's distortion correction, and
+  // what happened when the app asked for it off. YUV is a processed output, so
+  // a device that corrects it by default hands over frames whose geometry is
+  // not the pre-correction geometry that `intrinsics` and `distortion` describe.
+  // The set result is -1 when no request was made because the device does not
+  // offer OFF.
+  bool distortion_correction_off_available = false;
+  int32_t distortion_correction_set_result = -1;
+
   // The calibration the manufacturer measured for this lens, if the device
   // publishes it. Solving for intrinsics from the images alone needs wide
   // coverage and a lot of frames; being handed them is worth a great deal when
