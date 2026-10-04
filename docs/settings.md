@@ -21,7 +21,7 @@ fps       = auto | 30           # pins the frame rate instead of letting AE pick
 adb push capture.conf /sdcard/Android/data/com.sensor.logger/files/
 ```
 
-`shutter`, `fps`, `mains`, `shift` and `residual` can also be changed in the PRO panel, and each change is written back to this file for the next recording. `shift` accepts values greater than `0` and below `0.15625`; `residual` accepts values greater than `0` and below `1.0`. The panel offers a smaller preset list around the defaults. `capture` is file-only. Retention has its own toolbar button and is saved to the file; Lens has its own toolbar button but a lens selected there applies only until the app restarts unless `capture.conf` is also updated.
+`shutter`, `fps`, `mains`, `shift` and `residual` can also be changed in the PRO panel, and each change is written back to this file for the next recording. `shift` accepts values greater than `0` and below `0.15625`; `residual` accepts values greater than `0` and below `1.0`. The panel offers a smaller preset list around the defaults. `capture` is file-only. Retention and Lens each have their own toolbar button and are saved to the file; a lens that fails to start is not saved.
 
 Every rear camera is logged at startup with its focal length, so `lens` can name one by id. On a Galaxy S25 Ultra two are offered: `0` at 6.3mm and `2` at 2.2mm.
 

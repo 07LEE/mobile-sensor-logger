@@ -720,7 +720,12 @@ void SessionRecorder::WriteManifest(int64_t end_timestamp_ns,
               "sensor reads them\",\n"
            << "  \"imu_note\": \"m/s^2 and rad/s in the device frame"
            << (camera_.timestamps_realtime
-                   ? ", on the same clock as the frame timestamps\",\n"
+                   ? ", on the same clock as the frame timestamps, which "
+                     "makes them comparable and not aligned: a frame "
+                     "timestamp is the start of exposure, so the image is "
+                     "centred later by about exposure_ns/2 + "
+                     "rolling_shutter_skew_ns/2 from capture.csv, and a "
+                     "device-specific offset remains to be estimated\",\n"
                    : "; this camera's timestamp source is NOT realtime, so "
                      "frame and IMU timestamps are not on the same clock\",\n")
            << "  \"sharpness_metric\": \"variance of Laplacian on luma, "
