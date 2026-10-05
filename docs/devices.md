@@ -21,6 +21,8 @@ Hardware parameters and test results for devices tested with Mobile Sensor Logge
 
 These values are read from each device rather than assumed. The rolling shutter skew is nearly four times longer on the Flip4 and about as long as the gap between frames, so the same movement skews its frames far more.
 
+The Galaxy Z Flip4 lists no standard distortion correction modes and exposes a vendor tag for it instead, `samsung.android.control.lensDistortionCorrectionMode` (0x80ee0059, int32, listed values 0 and 1). Its meaning is undocumented. Setting it to 0 or 1 changed nothing in the YUV frames of the ultrawide camera (id 2): checkerboard corner lines were straight to 0.31 px in both and with the tag unset, and a fitted `k1` of about -0.013 agrees with the recorded -0.0073, so the recorded intrinsics describe the frames. The main camera and the edges of the frame were not checked, and the app does not set the tag.
+
 Both tested devices report semi-planar VU chroma. Planar output remains unverified on real hardware.
 
 The max fps is `android.scaler.availableMinFrameDurations` for the capture size's `YUV_420_888` entry, on the Galaxy S25 Ultra exactly 33,333,333ns — 1/30 — a hardware ceiling rather than anything `fps` in capture.conf can raise. Left at `auto`, the platform's own choice has been measured landing below this ceiling in a dim room (24fps at ISO1359, against 30fps in a bright one at the same location) rather than always sitting at it — see [settings.md](settings.md#pinning-the-frame-rate).
